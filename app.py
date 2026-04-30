@@ -288,7 +288,7 @@ def _sidebar() -> list[str]:
 
         st.markdown(
             "<p style='color:rgba(255,255,255,0.35);font-size:0.72rem;"
-            "text-align:center;margin-top:12px'>© Muhammad Iqbal 2026</p>",
+            "text-align:center;margin-top:12px'>© Tri-Bal 2026</p>",
             unsafe_allow_html=True,
         )
 
