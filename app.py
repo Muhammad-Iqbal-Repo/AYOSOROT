@@ -399,7 +399,7 @@ def _tab_search(selected_keys: list[str]) -> None:
         with st.form("search_form"):
             name = st.text_input(
                 "Nama lengkap tokoh:",
-                placeholder="Contoh: Prabowo Subianto, Bahlil Lahadalia...",
+                placeholder="Contoh: ABC... Bisa juga dengan ditambahkan kata kunci contekstual seperti kota atau jabatan untuk hasil lebih akurat.",
                 label_visibility="collapsed",
             )
             submitted = st.form_submit_button(
