@@ -87,6 +87,7 @@ _THINKING_MAX_TOKENS  = 8000
 # Writer empty-response retry config
 _MAX_WRITER_RETRIES  = 3
 _TOKEN_INCREMENT     = 1000   # larger increment for thinking models
+_TEMP_INCREMENT      = 0.1
 _RETRY_DELAY_SEC     = 3.0    # thinking models are slower; wait longer
 
 # Model name fragments that identify Gemini "thinking" models.

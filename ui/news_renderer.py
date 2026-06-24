@@ -14,6 +14,9 @@ Internal helpers
   _render_card(article)      — one bordered card
   _filter_articles(...)      — applies quality + text filters
 """
+from html import escape
+from urllib.parse import urlparse
+
 import streamlit as st
 
 from agent.schema import NewsArticle, SourceQuality
@@ -32,22 +35,41 @@ _QUALITY_ORDER = [
 
 # ── Single article card ───────────────────────────────────────────────────────
 
+def _escape_markdown(text: str | None) -> str:
+    """Escapes markdown control characters in model-derived text."""
+    value = "" if text is None else str(text)
+    for char in ("\\", "`", "*", "_", "{", "}", "[", "]", "(", ")", "#", "+", "-", ".", "!"):
+        value = value.replace(char, f"\\{char}")
+    return value
+
+
+def _safe_http_url(url: str | None) -> str:
+    """Returns *url* only when it is a valid http(s) URL."""
+    value = (url or "").strip()
+    parsed = urlparse(value)
+    if parsed.scheme in {"http", "https"} and parsed.netloc:
+        return value
+    return ""
+
+
 def _render_card(article: NewsArticle) -> None:
     """Renders one article as a styled bordered card."""
     with st.container(border=True):
         # Title — linked when a URL is present
-        if article.url:
-            st.markdown(f"#### [{article.title}]({article.url})")
+        title = _escape_markdown(article.title)
+        safe_url = _safe_http_url(article.url)
+        if safe_url:
+            st.markdown(f"#### [{title}]({safe_url})")
         else:
-            st.markdown(f"#### {article.title}")
+            st.markdown(f"#### {title}")
 
         # Meta row: source name · quality badge · date
         meta_parts = [
-            f"**{article.source_name}**",
+            f"**{escape(str(article.source_name))}**",
             source_quality_badge(article.quality),
         ]
         if article.published_date:
-            meta_parts.append(f"🗓️ {article.published_date}")
+            meta_parts.append(f"🗓️ {escape(str(article.published_date))}")
 
         st.markdown(
             " &nbsp;·&nbsp; ".join(meta_parts),
@@ -55,7 +77,7 @@ def _render_card(article: NewsArticle) -> None:
         )
 
         # Summary body
-        st.markdown(article.summary)
+        st.markdown(_escape_markdown(article.summary))
 
 
 # ── Filter helper ─────────────────────────────────────────────────────────────

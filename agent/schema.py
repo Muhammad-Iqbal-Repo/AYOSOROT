@@ -13,7 +13,7 @@ Key design decisions
   partial response from Gemini.
 """
 from enum import Enum
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional
 
 
@@ -37,9 +37,28 @@ class ConfidenceLevel(str, Enum):
 
 class SourceEntry(BaseModel):
     """A single research source with a reliability tag."""
-    url:     str
-    title:   Optional[str] = None
-    quality: SourceQuality = SourceQuality.OTHER
+    source_id:    Optional[str] = None  # e.g. "S1"; used by claims.evidence_ids
+    url:          str
+    title:        Optional[str] = None
+    quality:      SourceQuality = SourceQuality.OTHER
+    retrieved_at: Optional[str] = None  # ISO date when SOROT collected the source
+    snippet:      Optional[str] = None  # Short supporting excerpt or finding
+
+    @field_validator("quality", mode="before")
+    @classmethod
+    def _coerce_quality(cls, value):
+        return _normalise_quality(value)
+
+
+class ClaimEntry(BaseModel):
+    """A fact-level claim linked back to one or more source entries."""
+    claim_id:     Optional[str] = None  # e.g. "C1"
+    dimension:    str = ""              # e.g. "jabatan", "usaha", "partai"
+    field:        str = ""              # e.g. "current_roles", "corporate_affiliations"
+    value:        str = ""              # Exact displayed value when possible
+    evidence_ids: list[str] = Field(default_factory=list)
+    confidence:   Optional[ConfidenceLevel] = None
+    note:         Optional[str] = None
 
 
 class FieldConfidence(BaseModel):
@@ -131,6 +150,7 @@ class PersonProfile(BaseModel):
 
     # Metadata
     sources:          list[SourceEntry]  = Field(default_factory=list)
+    claims:           list[ClaimEntry]   = Field(default_factory=list)
     field_confidence: FieldConfidence    = Field(default_factory=FieldConfidence)
     analyst_notes:    Optional[str]      = None
 

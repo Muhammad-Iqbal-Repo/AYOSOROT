@@ -9,6 +9,8 @@ Tabs
   📰 Berita Terkini — person and company news
   🕸️  Graf Relasi  — interactive relationship graph
 """
+import os
+
 import streamlit as st
 from dotenv import load_dotenv
 
@@ -84,13 +86,18 @@ def _store_profile(profile: PersonProfile) -> None:
     st.session_state["last_profile"] = profile
 
 
+def _current_api_key() -> str:
+    """Returns the active API key from session state or the local environment."""
+    return (st.session_state.get("api_key") or os.getenv("GOOGLE_API_KEY", "")).strip()
+
+
 def _get_api_config() -> tuple[str, str, str]:
     """
     Returns (api_key, searcher_model, writer_model) from session state.
     Falls back to empty strings — callers should validate before using.
     """
     return (
-        st.session_state.get("api_key", ""),
+        _current_api_key(),
         st.session_state.get("searcher_model", ""),
         st.session_state.get("writer_model", ""),
     )
@@ -147,15 +154,18 @@ def _sidebar() -> list[str]:
         )
         api_key = st.text_input(
             label="api_key_label",
-            value=st.session_state.get("api_key", ""),
+            value=_current_api_key(),
             type="password",
             placeholder="Masukkan Google AI Studio API Key...",
             key="api_key_input",
             label_visibility="collapsed",
         )
 
-        if api_key and api_key != st.session_state.get("api_key", ""):
-            st.session_state["api_key"] = api_key
+        if api_key != st.session_state.get("api_key", ""):
+            if api_key:
+                st.session_state["api_key"] = api_key
+            else:
+                st.session_state.pop("api_key", None)
             st.session_state.pop("available_models", None)
             st.rerun()
 
@@ -376,7 +386,7 @@ def _tab_search(selected_keys: list[str]) -> None:
         disambig_options  dict[str, str] — label → resolved name
         disambig_keys     list[str]      — selected_keys at submission time
     """
-    api_key = st.session_state.get("api_key", "")
+    api_key = _current_api_key()
 
     # ── Search card ────────────────────────────────────────────────────────────
     st.markdown(

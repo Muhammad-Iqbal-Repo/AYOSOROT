@@ -8,6 +8,8 @@ Contains:
   - Badge and label primitives
   - Layout helpers used across all renderers
 """
+from html import escape
+
 import streamlit as st
 
 from agent.schema import ConfidenceLevel, SourceQuality
@@ -271,12 +273,15 @@ def inject_global_css() -> None:
 
 def badge(text: str, color: str, text_color: str = "white") -> str:
     """Returns an inline HTML pill badge."""
+    safe_text = escape(str(text))
+    safe_color = escape(str(color), quote=True)
+    safe_text_color = escape(str(text_color), quote=True)
     return (
         f'<span style="'
-        f"background:{color};color:{text_color};"
+        f"background:{safe_color};color:{safe_text_color};"
         f"padding:2px 10px;border-radius:20px;"
         f'font-size:0.75em;font-weight:600;margin:2px;display:inline-block">'
-        f"{text}</span>"
+        f"{safe_text}</span>"
     )
 
 
@@ -311,10 +316,12 @@ def section_header(icon: str, title: str, confidence: str | None = None) -> None
         confidence: Optional ConfidenceLevel string shown as a badge.
     """
     conf_html = f"&nbsp;{confidence_badge(confidence)}" if confidence else ""
+    safe_icon = escape(str(icon))
+    safe_title = escape(str(title))
     st.markdown(
         f'<div class="sorot-section-header">'
-        f'<span style="font-size:1.1em">{icon}</span>'
-        f'<span class="sorot-section-title">{title}</span>'
+        f'<span style="font-size:1.1em">{safe_icon}</span>'
+        f'<span class="sorot-section-title">{safe_title}</span>'
         f"{conf_html}"
         f"</div>",
         unsafe_allow_html=True,
@@ -323,19 +330,22 @@ def section_header(icon: str, title: str, confidence: str | None = None) -> None
 
 def metric_card(label: str, value: str) -> str:
     """Returns an HTML metric card string."""
+    safe_label = escape(str(label))
+    safe_value = escape(str(value))
     return (
         f'<div class="sorot-metric">'
-        f'<div class="sorot-metric-label">{label}</div>'
-        f'<div class="sorot-metric-value">{value}</div>'
+        f'<div class="sorot-metric-label">{safe_label}</div>'
+        f'<div class="sorot-metric-value">{safe_value}</div>'
         f"</div>"
     )
 
 
 def empty_state(message: str = "Tidak ditemukan") -> None:
     """Renders a muted caption for empty data sections."""
+    safe_message = escape(str(message))
     st.markdown(
         f'<p style="color:{Colors.MUTED};font-style:italic;font-size:0.85rem">'
-        f"{message}</p>",
+        f"{safe_message}</p>",
         unsafe_allow_html=True,
     )
 

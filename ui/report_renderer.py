@@ -11,15 +11,16 @@ The section_header() helper accepts an optional confidence level which is
 shown as a coloured badge next to the title, giving users instant visibility
 into how reliable each section's data is.
 """
+from html import escape
+from urllib.parse import urlparse
+
 import pandas as pd
 import streamlit as st
 
-from agent.schema import PersonProfile, SourceQuality
+from agent.schema import ClaimEntry, PersonProfile, SourceEntry
 from ui.components import (
     Colors,
     badge,
-    confidence_badge,
-    confidence_color,
     empty_state,
     flag_badge,
     metric_card,
@@ -39,6 +40,114 @@ def _text_input(key: str, placeholder: str = "🔍 Filter...") -> str:
     ).strip().lower()
 
 
+def _safe_http_url(url: str | None) -> str:
+    """Returns *url* only when it is a valid http(s) URL."""
+    value = (url or "").strip()
+    parsed = urlparse(value)
+    if parsed.scheme in {"http", "https"} and parsed.netloc:
+        return value
+    return ""
+
+
+def _quality_text(source: SourceEntry) -> str:
+    """Returns the human-readable quality value for a source."""
+    return getattr(source.quality, "value", str(source.quality))
+
+
+def _source_id(source: SourceEntry, index: int) -> str:
+    """Returns an explicit source_id or a stable fallback like S1."""
+    return source.source_id or f"S{index + 1}"
+
+
+def _source_lookup(profile: PersonProfile) -> dict[str, SourceEntry]:
+    """Builds a source lookup keyed by source_id and fallback row number."""
+    lookup: dict[str, SourceEntry] = {}
+    for index, source in enumerate(profile.sources):
+        lookup[_source_id(source, index)] = source
+    return lookup
+
+
+def _normalise_claim_text(value: str) -> str:
+    """Normalises claim values for forgiving exact-ish matching."""
+    return " ".join(str(value).casefold().split())
+
+
+def _claims_for(profile: PersonProfile, field: str, value: str | None = None) -> list[ClaimEntry]:
+    """Returns claims matching a profile field and optional displayed value."""
+    claims = [claim for claim in profile.claims if claim.field == field]
+    if value is None:
+        return claims
+
+    target = _normalise_claim_text(value)
+    matched: list[ClaimEntry] = []
+    for claim in claims:
+        claim_value = _normalise_claim_text(claim.value)
+        if claim_value == target or claim_value in target or target in claim_value:
+            matched.append(claim)
+    return matched
+
+
+def _source_chip(source_id: str, source: SourceEntry) -> str:
+    """Returns one clickable evidence chip."""
+    url = _safe_http_url(source.url)
+    domain = urlparse(url).netloc.replace("www.", "") if url else ""
+    label = source.title or domain or source_id
+    if len(label) > 28:
+        label = f"{label[:25]}..."
+
+    tooltip_parts = [_quality_text(source)]
+    if source.retrieved_at:
+        tooltip_parts.append(f"retrieved {source.retrieved_at}")
+    if source.snippet:
+        tooltip_parts.append(source.snippet)
+    tooltip = " | ".join(tooltip_parts)
+
+    attrs = (
+        'style="background:#E8F0FE;color:#1E3A5F;padding:2px 8px;'
+        'border-radius:999px;font-size:0.72rem;font-weight:600;'
+        'text-decoration:none;margin-left:4px;display:inline-block"'
+    )
+    title = escape(tooltip, quote=True)
+    text = escape(label)
+    if url:
+        return f'<a href="{escape(url, quote=True)}" target="_blank" title="{title}" {attrs}>{text}</a>'
+    return f'<span title="{title}" {attrs}>{text}</span>'
+
+
+def _claim_sources_html(profile: PersonProfile, field: str, value: str | None = None) -> str:
+    """Returns source chips for claims linked to a field/value pair."""
+    claims = _claims_for(profile, field, value)
+    if not claims:
+        return ""
+
+    lookup = _source_lookup(profile)
+    seen: set[str] = set()
+    chips: list[str] = []
+    for claim in claims:
+        for source_id in claim.evidence_ids:
+            if source_id in seen or source_id not in lookup:
+                continue
+            seen.add(source_id)
+            chips.append(_source_chip(source_id, lookup[source_id]))
+
+    if chips:
+        return " ".join(chips)
+    return badge("Tanpa sumber eksplisit", "#E2E8F0", Colors.MUTED)
+
+
+def _render_evidence_row(label: str, value: str, chips_html: str = "") -> None:
+    """Renders one compact claim row with optional evidence chips."""
+    st.markdown(
+        "<div style='padding:6px 0;border-bottom:1px solid #E5E7EB'>"
+        f"<span style='color:{Colors.MUTED};font-size:0.78rem;font-weight:600'>"
+        f"{escape(label)}</span>"
+        f"<span style='margin-left:8px'>{escape(value)}</span>"
+        f"{chips_html}"
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+
 def _apply_filter(df: pd.DataFrame, query: str) -> pd.DataFrame:
     """Returns rows where ANY column contains *query* (case-insensitive)."""
     if not query:
@@ -49,25 +158,6 @@ def _apply_filter(df: pd.DataFrame, query: str) -> pd.DataFrame:
     return df[mask]
 
 
-def _show_table(
-    df: pd.DataFrame,
-    filter_key: str,
-    placeholder: str,
-    extra_config: dict | None = None,
-) -> None:
-    """Renders a filter input + dataframe with a row-count caption."""
-    query    = _text_input(filter_key, placeholder)
-    filtered = _apply_filter(df, query)
-
-    if filtered.empty:
-        st.caption("⚠️ Tidak ada hasil yang cocok dengan filter.")
-    else:
-        cfg = {**_TABLE_CFG, **(extra_config or {})}
-        st.dataframe(filtered, **cfg)
-
-    st.caption(f"{len(filtered)} dari {len(df)} baris ditampilkan")
-
-
 # ── Section renderers ─────────────────────────────────────────────────────────
 
 def _render_header(profile: PersonProfile) -> None:
@@ -75,9 +165,10 @@ def _render_header(profile: PersonProfile) -> None:
     col_name, col_status = st.columns([3, 1])
 
     with col_name:
+        safe_name = escape(profile.full_name)
         st.markdown(
             f"<h2 style='margin:0;color:{Colors.PRIMARY}'>"
-            f"👤 {profile.full_name}</h2>",
+            f"👤 {safe_name}</h2>",
             unsafe_allow_html=True,
         )
         if profile.also_known_as:
@@ -129,14 +220,35 @@ def _render_roles(profile: PersonProfile) -> None:
     section_header("🏛️", "Jabatan & Instansi", confidence=profile.field_confidence.jabatan)
 
     rows = (
-        [{"Status": "🟢 Saat Ini",    "Jabatan / Instansi": r} for r in profile.current_roles]
-        + [{"Status": "🕐 Sebelumnya", "Jabatan / Instansi": r} for r in profile.past_roles]
+        [
+            {"status": "Saat Ini", "role": r, "field": "current_roles"}
+            for r in profile.current_roles
+        ]
+        + [
+            {"status": "Sebelumnya", "role": r, "field": "past_roles"}
+            for r in profile.past_roles
+        ]
     )
     if not rows:
         empty_state()
         return
 
-    _show_table(pd.DataFrame(rows), "filter_jabatan", "🔍 Filter jabatan atau instansi...")
+    query = _text_input("filter_jabatan", "🔍 Filter jabatan atau instansi...")
+    filtered = [
+        row for row in rows
+        if not query or query in row["role"].lower() or query in row["status"].lower()
+    ]
+    if not filtered:
+        st.caption("⚠️ Tidak ada hasil yang cocok dengan filter.")
+        return
+
+    for row in filtered:
+        _render_evidence_row(
+            row["status"],
+            row["role"],
+            _claim_sources_html(profile, row["field"], row["role"]),
+        )
+    st.caption(f"{len(filtered)} dari {len(rows)} baris ditampilkan")
 
 
 def _render_party(profile: PersonProfile) -> None:
@@ -146,11 +258,23 @@ def _render_party(profile: PersonProfile) -> None:
         empty_state()
         return
 
-    _show_table(
-        pd.DataFrame({"Partai / Organisasi Politik": profile.party_affiliations}),
-        "filter_partai",
-        "🔍 Filter partai...",
-    )
+    query = _text_input("filter_partai", "🔍 Filter partai...")
+    filtered = [
+        party for party in profile.party_affiliations
+        if not query or query in party.lower()
+    ]
+    if not filtered:
+        st.caption("⚠️ Tidak ada hasil yang cocok dengan filter.")
+        return
+
+    for party in filtered:
+        _render_evidence_row(
+            "Partai / Organisasi Politik",
+            party,
+            _claim_sources_html(profile, "party_affiliations", party),
+        )
+    st.caption(f"{len(filtered)} dari {len(profile.party_affiliations)} baris ditampilkan")
+
     if profile.political_notes:
         st.caption(f"📝 {profile.political_notes}")
 
@@ -176,6 +300,9 @@ def _render_tni(profile: PersonProfile) -> None:
         ),
         **_TABLE_CFG,
     )
+    chips = _claim_sources_html(profile, "tni_polri")
+    if chips:
+        st.markdown(f"<p style='margin-top:6px'>Sumber: {chips}</p>", unsafe_allow_html=True)
 
 
 def _render_corporate(profile: PersonProfile) -> None:
@@ -185,15 +312,31 @@ def _render_corporate(profile: PersonProfile) -> None:
         empty_state()
         return
 
-    df = pd.DataFrame([
+    query = _text_input("filter_usaha", "🔍 Filter entitas, jabatan, atau grup...")
+    rows = [
         {
-            "Nama Entitas": c.entity_name,
-            "Jabatan":      c.role or "—",
-            "Grup Usaha":   c.group or "—",
+            "entity": c.entity_name,
+            "details": f"{c.role or '—'} | {c.group or '—'}",
         }
         for c in profile.corporate_affiliations
-    ])
-    _show_table(df, "filter_usaha", "🔍 Filter entitas, jabatan, atau grup...")
+    ]
+    filtered = [
+        row for row in rows
+        if not query
+        or query in row["entity"].lower()
+        or query in row["details"].lower()
+    ]
+    if not filtered:
+        st.caption("⚠️ Tidak ada hasil yang cocok dengan filter.")
+        return
+
+    for row in filtered:
+        _render_evidence_row(
+            row["details"],
+            row["entity"],
+            _claim_sources_html(profile, "corporate_affiliations", row["entity"]),
+        )
+    st.caption(f"{len(filtered)} dari {len(rows)} baris ditampilkan")
 
 
 def _render_family(profile: PersonProfile) -> None:
@@ -312,11 +455,15 @@ def _render_sources(profile: PersonProfile) -> None:
 
         df_sources = pd.DataFrame([
             {
+                "ID":       _source_id(s, i),
                 "Kualitas": s.quality,
                 "Judul":    s.title or "—",
+                "Diambil":  s.retrieved_at or "—",
+                "Cuplikan": s.snippet or "—",
                 "URL":      s.url,
             }
-            for s in sources_to_show
+            for i, s in enumerate(profile.sources)
+            if selected_q == "Semua" or s.quality == selected_q
         ])
         st.dataframe(
             df_sources,
@@ -346,7 +493,7 @@ def render_summary(summary_text: str) -> None:
                       May contain newline-separated paragraphs.
     """
     paragraphs = [p.strip() for p in summary_text.split("\n") if p.strip()]
-    paras_html = "".join(f"<p>{p}</p>" for p in paragraphs)
+    paras_html = "".join(f"<p>{escape(p)}</p>" for p in paragraphs)
     st.markdown(
         f'<div class="sorot-summary-card">{paras_html}</div>',
         unsafe_allow_html=True,
