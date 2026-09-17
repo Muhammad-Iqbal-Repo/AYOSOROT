@@ -1,0 +1,8 @@
+# Direct dependencies verified with Python 3.11.4 on 2026-09-17.
+streamlit==1.57.0
+google-genai==1.74.0
+google-api-core==2.30.3
+pydantic==2.13.3
+python-dotenv==1.2.2
+pandas==3.0.2
+pyvis==0.3.2

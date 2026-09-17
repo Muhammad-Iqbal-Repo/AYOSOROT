@@ -33,10 +33,14 @@ _TABLE_CFG = dict(use_container_width=True, hide_index=True)
 
 # ── Filter helpers ────────────────────────────────────────────────────────────
 
-def _text_input(key: str, placeholder: str = "🔍 Filter...") -> str:
+def _text_input(
+    key: str,
+    placeholder: str = "Filter...",
+    label: str = "Filter data",
+) -> str:
     """Renders a collapsed text input and returns the lowercased value."""
     return st.text_input(
-        label="", placeholder=placeholder, key=key, label_visibility="collapsed"
+        label=label, placeholder=placeholder, key=key, label_visibility="collapsed"
     ).strip().lower()
 
 
@@ -82,7 +86,7 @@ def _claims_for(profile: PersonProfile, field: str, value: str | None = None) ->
     matched: list[ClaimEntry] = []
     for claim in claims:
         claim_value = _normalise_claim_text(claim.value)
-        if claim_value == target or claim_value in target or target in claim_value:
+        if target and claim_value and claim_value == target:
             matched.append(claim)
     return matched
 
@@ -104,7 +108,7 @@ def _source_chip(source_id: str, source: SourceEntry) -> str:
 
     attrs = (
         'style="background:#E8F0FE;color:#1E3A5F;padding:2px 8px;'
-        'border-radius:999px;font-size:0.72rem;font-weight:600;'
+        'border-radius:4px;font-size:0.72rem;font-weight:600;'
         'text-decoration:none;margin-left:4px;display:inline-block"'
     )
     title = escape(tooltip, quote=True)
@@ -153,9 +157,30 @@ def _apply_filter(df: pd.DataFrame, query: str) -> pd.DataFrame:
     if not query:
         return df
     mask = df.apply(
-        lambda col: col.astype(str).str.lower().str.contains(query, na=False)
+        lambda col: col.astype(str).str.lower().str.contains(query, na=False, regex=False)
     ).any(axis=1)
     return df[mask]
+
+
+def _dimension_researched(profile: PersonProfile, dimension: str) -> bool:
+    """Treats legacy profiles as researched and new profiles by stored scope."""
+    return not profile.researched_dimensions or dimension in profile.researched_dimensions
+
+
+def _job_history_rows(profile: PersonProfile) -> list[dict[str, str]]:
+    """Builds display rows without turning an unknown end date into 'current'."""
+    return [
+        {
+            "Jabatan": j.title,
+            "Perusahaan": j.company,
+            "Industri": j.industry or "Tidak diketahui",
+            "Mulai": j.start_year or "Tidak diketahui",
+            "Selesai": j.end_year or "Tidak diketahui",
+            "Lokasi": j.location or "Tidak diketahui",
+            "Sumber": j.source or "Tidak diketahui",
+        }
+        for j in profile.job_history
+    ]
 
 
 # ── Section renderers ─────────────────────────────────────────────────────────
@@ -167,40 +192,63 @@ def _render_header(profile: PersonProfile) -> None:
     with col_name:
         safe_name = escape(profile.full_name)
         st.markdown(
-            f"<h2 style='margin:0;color:{Colors.PRIMARY}'>"
-            f"👤 {safe_name}</h2>",
+            f"<h2 class='sorot-profile-name'>{safe_name}</h2>",
             unsafe_allow_html=True,
         )
         if profile.also_known_as:
             st.caption(f"Alias: {', '.join(profile.also_known_as)}")
+        if profile.identity_context:
+            st.caption(f"Konteks identitas: {profile.identity_context}")
+        metadata: list[str] = []
+        if profile.researched_dimensions:
+            metadata.append(
+                "Dimensi: "
+                + ", ".join(
+                    key.replace("_", " ").capitalize()
+                    for key in profile.researched_dimensions
+                )
+            )
+        if profile.researched_at:
+            metadata.append(f"Waktu riset: {profile.researched_at}")
+        if metadata:
+            st.caption(" · ".join(metadata))
 
     with col_status:
         if profile.is_alive is True:
-            st.markdown(badge("✅ Masih Hidup", Colors.SUCCESS), unsafe_allow_html=True)
+            st.markdown(badge("Masih hidup", Colors.SUCCESS), unsafe_allow_html=True)
         elif profile.is_alive is False:
-            st.markdown(badge("❌ Meninggal", Colors.DANGER), unsafe_allow_html=True)
+            st.markdown(badge("Meninggal", Colors.DANGER), unsafe_allow_html=True)
             if profile.death_info:
                 st.caption(profile.death_info)
         else:
-            st.markdown(badge("❓ Tidak Diketahui", Colors.MUTED), unsafe_allow_html=True)
+            st.markdown(badge("Status tidak diketahui", Colors.MUTED), unsafe_allow_html=True)
 
     # Quick-glance metric row
     cards_html = '<div class="sorot-metric-row">'
-    cards_html += metric_card("Jabatan Aktif",   str(len(profile.current_roles)) or "—")
-    cards_html += metric_card("Jabatan Lampau",  str(len(profile.past_roles)) or "—")
-    cards_html += metric_card("Afiliasi Partai", str(len(profile.party_affiliations)) or "—")
-    cards_html += metric_card("Keluarga",        str(len(profile.family_members)) or "—")
-    cards_html += metric_card("Grup Usaha",      str(len(profile.corporate_affiliations)) or "—")
-    cards_html += metric_card("Riwayat Kerja",   str(len(profile.job_history)) or "—")
+    cards_html += metric_card("Sumber", str(len(profile.sources)))
+    cards_html += metric_card(
+        "Jabatan", str(len(profile.current_roles) + len(profile.past_roles))
+    )
+    cards_html += metric_card(
+        "Relasi",
+        str(
+            len(profile.family_members)
+            + len(profile.corporate_affiliations)
+            + len(profile.party_affiliations)
+        ),
+    )
     cards_html += "</div>"
     st.markdown(cards_html, unsafe_allow_html=True)
 
 
 def _render_classification_flags(profile: PersonProfile) -> None:
     section_header(
-        "🏛️", "Klasifikasi Pejabat",
+        "", "Klasifikasi Pejabat",
         confidence=profile.field_confidence.jabatan_khusus,
     )
+    if not _dimension_researched(profile, "jabatan_khusus"):
+        empty_state("Dimensi ini belum ditelusuri.")
+        return
     flags = {
         "Menteri":             profile.is_minister,
         "Wakil Menteri":       profile.is_deputy_minister,
@@ -217,7 +265,11 @@ def _render_classification_flags(profile: PersonProfile) -> None:
 
 
 def _render_roles(profile: PersonProfile) -> None:
-    section_header("🏛️", "Jabatan & Instansi", confidence=profile.field_confidence.jabatan)
+    section_header("", "Jabatan & Instansi", confidence=profile.field_confidence.jabatan)
+
+    if not _dimension_researched(profile, "jabatan"):
+        empty_state("Dimensi ini belum ditelusuri.")
+        return
 
     rows = (
         [
@@ -233,13 +285,13 @@ def _render_roles(profile: PersonProfile) -> None:
         empty_state()
         return
 
-    query = _text_input("filter_jabatan", "🔍 Filter jabatan atau instansi...")
+    query = _text_input("filter_jabatan", "Filter jabatan atau instansi")
     filtered = [
         row for row in rows
         if not query or query in row["role"].lower() or query in row["status"].lower()
     ]
     if not filtered:
-        st.caption("⚠️ Tidak ada hasil yang cocok dengan filter.")
+        st.caption("Tidak ada hasil yang cocok dengan filter.")
         return
 
     for row in filtered:
@@ -252,19 +304,22 @@ def _render_roles(profile: PersonProfile) -> None:
 
 
 def _render_party(profile: PersonProfile) -> None:
-    section_header("🎯", "Afiliasi Partai Politik", confidence=profile.field_confidence.partai)
+    section_header("", "Afiliasi Partai Politik", confidence=profile.field_confidence.partai)
 
+    if not _dimension_researched(profile, "partai"):
+        empty_state("Dimensi ini belum ditelusuri.")
+        return
     if not profile.party_affiliations:
         empty_state()
         return
 
-    query = _text_input("filter_partai", "🔍 Filter partai...")
+    query = _text_input("filter_partai", "Filter partai")
     filtered = [
         party for party in profile.party_affiliations
         if not query or query in party.lower()
     ]
     if not filtered:
-        st.caption("⚠️ Tidak ada hasil yang cocok dengan filter.")
+        st.caption("Tidak ada hasil yang cocok dengan filter.")
         return
 
     for party in filtered:
@@ -276,15 +331,21 @@ def _render_party(profile: PersonProfile) -> None:
     st.caption(f"{len(filtered)} dari {len(profile.party_affiliations)} baris ditampilkan")
 
     if profile.political_notes:
-        st.caption(f"📝 {profile.political_notes}")
+        st.caption(profile.political_notes)
 
 
 def _render_tni(profile: PersonProfile) -> None:
-    section_header("🎖️", "Status TNI / POLRI", confidence=profile.field_confidence.tni_polri)
+    section_header("", "Status TNI / POLRI", confidence=profile.field_confidence.tni_polri)
 
     t = profile.tni_polri
-    if not t.is_tni_polri:
-        empty_state("Bukan TNI/Polri atau tidak ditemukan")
+    if not _dimension_researched(profile, "tni_polri"):
+        empty_state("Dimensi ini belum ditelusuri.")
+        return
+    if t.is_tni_polri is None:
+        empty_state("Status TNI/POLRI tidak diketahui.")
+        return
+    if t.is_tni_polri is False:
+        empty_state("Tidak berstatus TNI/POLRI berdasarkan data yang ditemukan.")
         return
 
     status_color = "#1b5e20" if t.status == "Aktif" else "#e65100"
@@ -306,13 +367,16 @@ def _render_tni(profile: PersonProfile) -> None:
 
 
 def _render_corporate(profile: PersonProfile) -> None:
-    section_header("🏢", "Afiliasi Grup Usaha", confidence=profile.field_confidence.usaha)
+    section_header("", "Afiliasi Grup Usaha", confidence=profile.field_confidence.usaha)
 
+    if not _dimension_researched(profile, "usaha"):
+        empty_state("Dimensi ini belum ditelusuri.")
+        return
     if not profile.corporate_affiliations:
         empty_state()
         return
 
-    query = _text_input("filter_usaha", "🔍 Filter entitas, jabatan, atau grup...")
+    query = _text_input("filter_usaha", "Filter entitas, jabatan, atau grup")
     rows = [
         {
             "entity": c.entity_name,
@@ -327,7 +391,7 @@ def _render_corporate(profile: PersonProfile) -> None:
         or query in row["details"].lower()
     ]
     if not filtered:
-        st.caption("⚠️ Tidak ada hasil yang cocok dengan filter.")
+        st.caption("Tidak ada hasil yang cocok dengan filter.")
         return
 
     for row in filtered:
@@ -340,8 +404,11 @@ def _render_corporate(profile: PersonProfile) -> None:
 
 
 def _render_family(profile: PersonProfile) -> None:
-    section_header("👨‍👩‍👧", "Relasi Keluarga", confidence=profile.field_confidence.keluarga)
+    section_header("", "Relasi Keluarga", confidence=profile.field_confidence.keluarga)
 
+    if not _dimension_researched(profile, "keluarga"):
+        empty_state("Dimensi ini belum ditelusuri.")
+        return
     if not profile.family_members:
         empty_state()
         return
@@ -361,17 +428,17 @@ def _render_family(profile: PersonProfile) -> None:
 
     with col_rel:
         selected_rel = st.selectbox(
-            label="", options=["Semua"] + all_relations,
+            label="Hubungan keluarga", options=["Semua"] + all_relations,
             key="filter_keluarga_rel", label_visibility="collapsed",
         )
     with col_search:
-        query = _text_input("filter_keluarga_nama", "🔍 Filter nama atau peran...")
+        query = _text_input("filter_keluarga_nama", "Filter nama atau peran")
 
     filtered = df if selected_rel == "Semua" else df[df["Hubungan"] == selected_rel]
     filtered = _apply_filter(filtered, query)
 
     if filtered.empty:
-        st.caption("⚠️ Tidak ada hasil.")
+        st.caption("Tidak ada hasil.")
     else:
         st.dataframe(filtered, **_TABLE_CFG)
     st.caption(f"{len(filtered)} dari {len(df)} baris ditampilkan")
@@ -379,30 +446,22 @@ def _render_family(profile: PersonProfile) -> None:
 
 def _render_job_history(profile: PersonProfile) -> None:
     section_header(
-        "💼", "Riwayat Pekerjaan",
+        "", "Riwayat Pekerjaan",
         confidence=profile.field_confidence.riwayat_pekerjaan,
     )
 
+    if not _dimension_researched(profile, "riwayat_pekerjaan"):
+        empty_state("Dimensi ini belum ditelusuri.")
+        return
     if not profile.job_history:
         empty_state()
         return
 
-    rows = [
-        {
-            "Jabatan":    j.title,
-            "Perusahaan": j.company,
-            "Industri":   j.industry or "—",
-            "Mulai":      j.start_year or "—",
-            "Selesai":    j.end_year or "Sekarang",
-            "Lokasi":     j.location or "—",
-            "Sumber":     j.source or "—",
-        }
-        for j in profile.job_history
-    ]
+    rows = _job_history_rows(profile)
     df = (
         pd.DataFrame(rows)
         .assign(_sort=lambda d: d["Selesai"].map(
-            lambda v: "9999" if v == "Sekarang" else v
+            lambda v: "9999" if v.casefold() == "sekarang" else v
         ))
         .sort_values("_sort", ascending=False)
         .drop(columns=["_sort"])
@@ -414,17 +473,17 @@ def _render_job_history(profile: PersonProfile) -> None:
 
     with col_ind:
         selected_ind = st.selectbox(
-            label="", options=["Semua Industri"] + all_industries,
+            label="Industri", options=["Semua Industri"] + all_industries,
             key="filter_job_industry", label_visibility="collapsed",
         )
     with col_search:
-        query = _text_input("filter_job_search", "🔍 Filter jabatan, perusahaan, atau lokasi...")
+        query = _text_input("filter_job_search", "Filter jabatan, perusahaan, atau lokasi")
 
     filtered = df if selected_ind == "Semua Industri" else df[df["Industri"] == selected_ind]
     filtered = _apply_filter(filtered, query)
 
     if filtered.empty:
-        st.caption("⚠️ Tidak ada hasil.")
+        st.caption("Tidak ada hasil.")
     else:
         st.dataframe(filtered, **_TABLE_CFG)
     st.caption(f"{len(filtered)} dari {len(df)} entri ditampilkan")
@@ -433,9 +492,9 @@ def _render_job_history(profile: PersonProfile) -> None:
 def _render_sources(profile: PersonProfile) -> None:
     """Sources table with quality badges and analyst notes."""
     if profile.analyst_notes:
-        st.info(f"📝 **Catatan Analis:** {profile.analyst_notes}")
+        st.info(f"**Catatan analis:** {profile.analyst_notes}")
 
-    with st.expander("📎 Sumber Data"):
+    with st.expander("Sumber data"):
         if not profile.sources:
             empty_state("Tidak ada sumber yang dicatat")
             return
@@ -502,21 +561,13 @@ def render_summary(summary_text: str) -> None:
 
 # ── Main entry point ──────────────────────────────────────────────────────────
 
-def render_profile(profile: PersonProfile) -> None:
-    """
-    Renders a complete PersonProfile as a structured Streamlit report.
-
-    Sections (in order):
-      1. Header             — name, alias, vital status, metric cards
-      2. Klasifikasi Pejabat — flag badges with confidence indicator
-      3. Jabatan / Partai   — filterable tables (2-col)
-      4. TNI/Polri / Usaha  — filterable tables (2-col)
-      5. Relasi Keluarga    — filterable table with relation selectbox
-      6. Riwayat Pekerjaan  — filterable table with industry selectbox
-      7. Sumber Data        — quality-filtered sources table with legend
-    """
+def render_profile_header(profile: PersonProfile) -> None:
+    """Render the profile identity and compact factual metadata."""
     _render_header(profile)
-    st.divider()
+
+
+def render_profile_details(profile: PersonProfile) -> None:
+    """Render all evidence sections below the profile identity."""
     _render_classification_flags(profile)
     st.divider()
 
@@ -540,3 +591,21 @@ def render_profile(profile: PersonProfile) -> None:
     _render_job_history(profile)
     st.divider()
     _render_sources(profile)
+
+
+def render_profile(profile: PersonProfile) -> None:
+    """
+    Renders a complete PersonProfile as a structured Streamlit report.
+
+    Sections (in order):
+      1. Header             — name, alias, vital status, metric cards
+      2. Klasifikasi Pejabat — flag badges with confidence indicator
+      3. Jabatan / Partai   — filterable tables (2-col)
+      4. TNI/Polri / Usaha  — filterable tables (2-col)
+      5. Relasi Keluarga    — filterable table with relation selectbox
+      6. Riwayat Pekerjaan  — filterable table with industry selectbox
+      7. Sumber Data        — quality-filtered sources table with legend
+    """
+    render_profile_header(profile)
+    st.divider()
+    render_profile_details(profile)

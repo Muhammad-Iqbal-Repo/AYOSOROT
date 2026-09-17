@@ -6,16 +6,10 @@ Builds an interactive HTML network graph showing connections between the
 profiled person and their family members, corporate affiliations, and
 political parties.  The HTML is rendered inline via st.components.v1.html.
 
-Node colours
-────────────
-  Orange  — the main subject
-  Blue    — family members
-  Green   — companies / corporate entities
-  Purple  — political parties
-  Grey    — party affiliations (political orgs)
+Colour, shape, and text labels distinguish each relationship category. A
+tabular fallback exposes the same information without relying on the graphic.
 """
-import tempfile
-from pathlib import Path
+from html import escape
 
 import streamlit as st
 import streamlit.components.v1 as components
@@ -27,10 +21,10 @@ from agent.schema import PersonProfile
 # ── Constants ─────────────────────────────────────────────────────────────────
 
 _NODE_COLORS = {
-    "person":    "#e65100",   # orange  — subject
-    "family":    "#1565c0",   # blue
-    "company":   "#2e7d32",   # green
-    "party":     "#6a1b9a",   # purple
+    "person":  "#F0A500",
+    "family":  "#2F6B8A",
+    "company": "#357A55",
+    "party":   "#76528B",
 }
 
 _GRAPH_HEIGHT = "520px"
@@ -47,9 +41,10 @@ def _build_network(profile: PersonProfile) -> Network:
     net = Network(
         height=_GRAPH_HEIGHT,
         width="100%",
-        bgcolor="#0e1117",          # matches Streamlit dark background
-        font_color="#fafafa",
+        bgcolor="#FFFFFF",
+        font_color="#202C39",
         directed=False,
+        cdn_resources="in_line",
     )
     net.set_options("""
     {
@@ -62,7 +57,9 @@ def _build_network(profile: PersonProfile) -> Network:
         "minVelocity": 0.75,
         "solver": "forceAtlas2Based"
       },
-      "interaction": {"hover": true}
+      "interaction": {"hover": true, "keyboard": {"enabled": true}},
+      "nodes": {"borderWidth": 1, "font": {"face": "Arial", "color": "#202C39"}},
+      "edges": {"color": "#9AA4B2", "font": {"face": "Arial", "color": "#526172"}}
     }
     """)
 
@@ -74,17 +71,18 @@ def _build_network(profile: PersonProfile) -> Network:
         label=subject,
         color=_NODE_COLORS["person"],
         size=30,
-        title=f"<b>{subject}</b>",
+        title=f"<b>Tokoh: {escape(subject)}</b>",
         font={"size": 16},
+        shape="dot",
     )
 
     # Family members
     for member in profile.family_members:
         node_id = f"fam_{member.name}"
         label   = member.name
-        title   = f"<b>{member.name}</b><br>{member.relation}"
+        title   = f"<b>{escape(member.name)}</b><br>{escape(member.relation)}"
         if member.role:
-            title += f"<br>{member.role}"
+            title += f"<br>{escape(member.role)}"
 
         net.add_node(
             node_id,
@@ -92,23 +90,24 @@ def _build_network(profile: PersonProfile) -> Network:
             color=_NODE_COLORS["family"],
             size=20,
             title=title,
+            shape="ellipse",
         )
         net.add_edge(
             subject,
             node_id,
             label=member.relation,
-            color="#bbbbbb",
+            color="#9AA4B2",
             width=1.5,
         )
 
     # Corporate affiliations
     for corp in profile.corporate_affiliations:
         node_id = f"corp_{corp.entity_name}"
-        title   = f"<b>{corp.entity_name}</b>"
+        title   = f"<b>{escape(corp.entity_name)}</b>"
         if corp.role:
-            title += f"<br>Jabatan: {corp.role}"
+            title += f"<br>Jabatan: {escape(corp.role)}"
         if corp.group:
-            title += f"<br>Grup: {corp.group}"
+            title += f"<br>Grup: {escape(corp.group)}"
 
         net.add_node(
             node_id,
@@ -122,7 +121,7 @@ def _build_network(profile: PersonProfile) -> Network:
             subject,
             node_id,
             label=corp.role or "Afiliasi",
-            color="#bbbbbb",
+            color="#9AA4B2",
             width=1.5,
         )
 
@@ -134,18 +133,51 @@ def _build_network(profile: PersonProfile) -> Network:
             label=party,
             color=_NODE_COLORS["party"],
             size=18,
-            title=f"<b>{party}</b>",
+            title=f"<b>{escape(party)}</b>",
             shape="diamond",
         )
         net.add_edge(
             subject,
             node_id,
             label="Anggota / Afiliasi",
-            color="#bbbbbb",
+            color="#9AA4B2",
             width=1.5,
         )
 
     return net
+
+
+def _relationship_rows(profile: PersonProfile) -> list[dict[str, str]]:
+    """Returns every graph edge in a screen-reader-friendly table shape."""
+    rows: list[dict[str, str]] = []
+    rows.extend(
+        {
+            "Kategori": "Keluarga",
+            "Nama": member.name,
+            "Hubungan": member.relation,
+            "Detail": member.role or "Tidak ada detail tambahan",
+        }
+        for member in profile.family_members
+    )
+    rows.extend(
+        {
+            "Kategori": "Perusahaan",
+            "Nama": affiliation.entity_name,
+            "Hubungan": affiliation.role or "Afiliasi",
+            "Detail": affiliation.group or "Tidak ada detail tambahan",
+        }
+        for affiliation in profile.corporate_affiliations
+    )
+    rows.extend(
+        {
+            "Kategori": "Partai",
+            "Nama": party,
+            "Hubungan": "Anggota atau afiliasi",
+            "Detail": "Tidak ada detail tambahan",
+        }
+        for party in profile.party_affiliations
+    )
+    return rows
 
 
 def render_graph(profile: PersonProfile) -> None:
@@ -168,25 +200,25 @@ def render_graph(profile: PersonProfile) -> None:
         )
         return
 
-    net  = _build_network(profile)
-
-    # Write to a temp HTML file then read back for st.components
-    with tempfile.NamedTemporaryFile(suffix=".html", delete=False, mode="w") as tmp:
-        tmp_path = Path(tmp.name)
-        net.save_graph(str(tmp_path))
-
-    html_content = tmp_path.read_text(encoding="utf-8")
-    tmp_path.unlink(missing_ok=True)
+    net = _build_network(profile)
+    html_content = net.generate_html(notebook=False)
 
     # Legend
     legend_html = (
-        '<div style="font-size:0.75em;margin-bottom:6px">'
-        '<span style="background:#e65100;color:white;padding:1px 7px;border-radius:8px">● Tokoh</span>&nbsp;'
-        '<span style="background:#1565c0;color:white;padding:1px 7px;border-radius:8px">● Keluarga</span>&nbsp;'
-        '<span style="background:#2e7d32;color:white;padding:1px 7px;border-radius:8px">■ Perusahaan</span>&nbsp;'
-        '<span style="background:#6a1b9a;color:white;padding:1px 7px;border-radius:8px">◆ Partai</span>'
+        '<div class="sorot-graph-legend">'
+        '<span><b>● Tokoh</b></span>'
+        '<span><b>○ Keluarga</b></span>'
+        '<span><b>■ Perusahaan</b></span>'
+        '<span><b>◆ Partai</b></span>'
         "</div>"
     )
     st.markdown(legend_html, unsafe_allow_html=True)
 
     components.html(html_content, height=550, scrolling=False)
+
+    with st.expander("Lihat relasi sebagai tabel"):
+        st.dataframe(
+            _relationship_rows(profile),
+            use_container_width=True,
+            hide_index=True,
+        )

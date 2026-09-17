@@ -40,15 +40,12 @@ import json
 import os
 import re
 import time
+from datetime import date
+from urllib.parse import urlparse
 
 from google import genai
+from google.genai import errors as genai_errors
 from google.genai import types
-from google.api_core.exceptions import (
-    GoogleAPIError,
-    InvalidArgument,
-    ResourceExhausted,
-    Unauthenticated,
-)
 
 from agent.exceptions import (
     ApiError,
@@ -67,7 +64,13 @@ from agent.prompts import (
     build_summary_prompt,
     build_writer_prompt,
 )
-from agent.schema import DisambiguationCandidate, NewsArticle, PersonProfile
+from agent.schema import (
+    DisambiguationCandidate,
+    DisambiguationResponse,
+    NewsArticle,
+    NewsResponse,
+    PersonProfile,
+)
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -173,6 +176,10 @@ class PersonIntelAgent:
                 m.name.split("/")[-1]
                 for m in client.models.list()
                 if m.name.split("/")[-1].startswith("gemini-")
+                and "generateContent" in {
+                    getattr(action, "value", str(action))
+                    for action in (getattr(m, "supported_actions", None) or [])
+                }
             ]
             return sorted(set(models))
         except Exception as exc:
@@ -188,17 +195,14 @@ class PersonIntelAgent:
         Checks whether *name* refers to multiple public figures.
         Writer-only (no search). Fails silently — never blocks search.
         """
-        try:
-            raw  = self._call_writer(
-                prompt=build_disambiguation_prompt(name),
-                max_tokens=_DISAMBIG_TOKENS,
-                label=f"DISAMBIG:{name}",
-            )
-            data = json.loads(raw)
-            return [DisambiguationCandidate(**c) for c in data.get("candidates", []) if c]
-        except Exception as exc:
-            logger.warning(f"[DISAMBIG:{name}] Skipped — {exc}")
-            return []
+        raw = self._call_writer(
+            prompt=build_disambiguation_prompt(name),
+            max_tokens=_DISAMBIG_TOKENS,
+            label=f"DISAMBIG:{name}",
+            response_schema=DisambiguationResponse,
+        )
+        data = json.loads(raw)
+        return [DisambiguationCandidate(**c) for c in data.get("candidates", []) if c]
 
     def run(
         self,
@@ -232,6 +236,7 @@ class PersonIntelAgent:
             prompt=build_writer_prompt(name, raw_findings, selected_keys),
             max_tokens=_WRITER_MAX_TOKENS,
             label=f"WRITER:profile:{name}",
+            response_schema=PersonProfile,
         )
 
         _progress(progress_callback, "📋 Memvalidasi struktur data...", 0.9)
@@ -240,73 +245,57 @@ class PersonIntelAgent:
     def generate_summary(self, profile: PersonProfile) -> str:
         """
         Generates a narrative summary in Bahasa Indonesia.
-        Writer-only. Returns empty string on any error.
+        Writer-only. Raises a typed agent error when generation fails.
         """
         label = f"WRITER:summary:{profile.full_name}"
-        try:
-            summary = self._call_writer(
-                prompt=build_summary_prompt(profile.model_dump_json(indent=2)),
-                max_tokens=_SUMMARY_MAX_TOKENS,
-                label=label,
-                extract_json=False,
-            )
-            logger.info(f"[{label}] Summary generated ({len(summary)} chars)")
-            return summary.strip()
-        except Exception as exc:
-            logger.warning(f"[{label}] Failed — {exc}")
-            return ""
+        summary = self._call_writer(
+            prompt=build_summary_prompt(profile.model_dump_json(indent=2)),
+            max_tokens=_SUMMARY_MAX_TOKENS,
+            label=label,
+            extract_json=False,
+        )
+        logger.info(f"[{label}] Summary generated ({len(summary)} chars)")
+        return summary.strip()
 
     def fetch_news(self, name: str) -> list[NewsArticle]:
-        """Two-agent news pipeline for a person. Returns [] on error."""
+        """Two-agent news pipeline for a person. Raises on request failure."""
         label_s = f"SEARCHER:news:{name}"
         label_w = f"WRITER:news:{name}"
-        try:
-            raw_findings = self._call_searcher(
-                prompt=build_news_searcher_prompt(name),
-                max_tokens=_NEWS_SEARCHER_TOKENS,
-                label=label_s,
-            )
-            logger.info(f"[{label_s}] {len(raw_findings)} chars returned")
+        raw_findings = self._call_searcher(
+            prompt=build_news_searcher_prompt(name),
+            max_tokens=_NEWS_SEARCHER_TOKENS,
+            label=label_s,
+        )
+        logger.info(f"[{label_s}] {len(raw_findings)} chars returned")
 
-            raw_json = self._call_writer(
-                prompt=build_news_writer_prompt(name, raw_findings),
-                max_tokens=_NEWS_WRITER_TOKENS,
-                label=label_w,
-            )
-            articles = self._parse_articles(json.loads(raw_json), label=label_w)
-            if not articles:
-                logger.warning(
-                    f"[{label_w}] Writer returned 0 articles. "
-                    f"Searcher findings (first 400 chars):\n{raw_findings[:400]}"
-                )
-            return articles
-        except Exception as exc:
-            logger.warning(f"[{label_w}] News fetch failed — {type(exc).__name__}: {exc}")
-            return []
+        raw_json = self._call_writer(
+            prompt=build_news_writer_prompt(name, raw_findings),
+            max_tokens=_NEWS_WRITER_TOKENS,
+            label=label_w,
+            response_schema=NewsResponse,
+        )
+        return self._parse_articles(json.loads(raw_json), label=label_w)[:10]
 
     def fetch_company_news(
         self, company_name: str, person_name: str
     ) -> list[NewsArticle]:
-        """Two-agent company news pipeline. Returns [] on error."""
+        """Two-agent company news pipeline. Raises on request failure."""
         label_s = f"SEARCHER:company_news:{company_name}"
         label_w = f"WRITER:company_news:{company_name}"
-        try:
-            raw_findings = self._call_searcher(
-                prompt=build_company_news_searcher_prompt(company_name, person_name),
-                max_tokens=_NEWS_SEARCHER_TOKENS,
-                label=label_s,
-            )
-            logger.info(f"[{label_s}] {len(raw_findings)} chars returned")
+        raw_findings = self._call_searcher(
+            prompt=build_company_news_searcher_prompt(company_name, person_name),
+            max_tokens=_NEWS_SEARCHER_TOKENS,
+            label=label_s,
+        )
+        logger.info(f"[{label_s}] {len(raw_findings)} chars returned")
 
-            raw_json = self._call_writer(
-                prompt=build_news_writer_prompt(company_name, raw_findings),
-                max_tokens=_NEWS_WRITER_TOKENS,
-                label=label_w,
-            )
-            return self._parse_articles(json.loads(raw_json), label=label_w)
-        except Exception as exc:
-            logger.warning(f"[{label_w}] Company news failed — {type(exc).__name__}: {exc}")
-            return []
+        raw_json = self._call_writer(
+            prompt=build_news_writer_prompt(company_name, raw_findings),
+            max_tokens=_NEWS_WRITER_TOKENS,
+            label=label_w,
+            response_schema=NewsResponse,
+        )
+        return self._parse_articles(json.loads(raw_json), label=label_w)[:10]
 
     # ── Agent call wrappers ───────────────────────────────────────────────────
 
@@ -335,6 +324,7 @@ class PersonIntelAgent:
         max_tokens:   int,
         label:        str,
         extract_json: bool = True,
+        response_schema=None,
     ) -> str:
         """
         Calls the Writer model without search tool.
@@ -347,14 +337,16 @@ class PersonIntelAgent:
             extract_json: True → extract JSON block from response.
                           False → return raw text (for narrative summaries).
         """
-        tokens      = max_tokens
-        temperature = 0.1
+        thinking    = _is_thinking_model(self._writer_model)
+        tokens      = max(max_tokens, _THINKING_MAX_TOKENS) if thinking else max_tokens
+        temperature = 1.0 if thinking else 0.1
         last_exc: Exception | None = None
 
         for attempt in range(1, _MAX_WRITER_RETRIES + 1):
             if attempt > 1:
                 tokens      += _TOKEN_INCREMENT
-                temperature += _TEMP_INCREMENT
+                if not thinking:
+                    temperature += _TEMP_INCREMENT
                 delay        = _RETRY_DELAY_SEC * (attempt - 1)
                 logger.warning(
                     f"[{label}] Writer retry {attempt}/{_MAX_WRITER_RETRIES} — "
@@ -372,21 +364,21 @@ class PersonIntelAgent:
                     label=label,
                     extract_json=extract_json,
                     progress_callback=None,
+                    response_schema=response_schema,
                 )
-            except EmptyResponseError as exc:
-                # Empty response — retry with relaxed parameters
+            except (EmptyResponseError, ParseError) as exc:
                 last_exc = exc
-                logger.warning(f"[{label}] Empty response on attempt {attempt} — will retry")
+                logger.warning(
+                    f"[{label}] {type(exc).__name__} on attempt {attempt} — will retry"
+                )
             except (SafetyBlockError, ConfigurationError, QuotaExceededError, ApiError):
                 raise   # Permanent — do not retry
-            except Exception as exc:
-                last_exc = exc
-                logger.warning(f"[{label}] Writer attempt {attempt} failed — {exc}")
 
+        if isinstance(last_exc, ParseError):
+            raise last_exc
         raise EmptyResponseError(
-            f"[{label}] Writer model '{self._writer_model}' mengembalikan respons kosong "
-            f"setelah {_MAX_WRITER_RETRIES} percobaan. "
-            "Coba pilih model Writer yang berbeda (misalnya gemini-2.0-flash)."
+            f"[{label}] Writer model '{self._writer_model}' tidak menghasilkan respons "
+            f"setelah {_MAX_WRITER_RETRIES} percobaan. Coba pilih model Writer lain."
         ) from last_exc
 
     # ── Core model caller ─────────────────────────────────────────────────────
@@ -401,6 +393,7 @@ class PersonIntelAgent:
         label:             str,
         extract_json:      bool,
         progress_callback,
+        response_schema=None,
     ) -> str:
         """
         Makes a single generate_content call to *model*.
@@ -421,7 +414,7 @@ class PersonIntelAgent:
         """
         thinking = _is_thinking_model(model)
         resolved_temperature = 1.0 if thinking else temperature
-        resolved_tokens      = _THINKING_MAX_TOKENS if thinking else max_tokens
+        resolved_tokens      = max(_THINKING_MAX_TOKENS, max_tokens) if thinking else max_tokens
 
         if thinking:
             logger.info(
@@ -437,26 +430,34 @@ class PersonIntelAgent:
                     tools=tools,
                     temperature=resolved_temperature,
                     max_output_tokens=resolved_tokens,
+                    response_mime_type="application/json" if extract_json else None,
+                    response_schema=response_schema if extract_json else None,
                 ),
             )
-        except Unauthenticated as exc:
-            raise ConfigurationError(
-                f"[{label}] API key tidak valid. Periksa kembali kunci API Anda."
-            ) from exc
-        except InvalidArgument as exc:
+        except genai_errors.APIError as exc:
+            code = getattr(exc, "code", None)
+            if code in {401, 403}:
+                raise ConfigurationError(
+                    f"[{label}] API key tidak valid atau tidak memiliki akses."
+                ) from exc
+            if code == 429:
+                raise QuotaExceededError(
+                    f"[{label}] Kuota atau batas permintaan Gemini tercapai. Coba lagi nanti."
+                ) from exc
+            detail = getattr(exc, "message", None) or getattr(exc, "status", None)
             raise ApiError(
-                f"[{label}] Permintaan tidak valid: {exc}. "
-                "Jika menggunakan model thinking (gemini-2.5-x), pastikan "
-                "tidak ada parameter yang tidak didukung."
+                f"[{label}] Gemini API error ({code or 'unknown'}): "
+                f"{detail or 'permintaan gagal'}."
             ) from exc
-        except ResourceExhausted as exc:
-            raise QuotaExceededError(
-                f"[{label}] Kuota API Gemini habis. Coba lagi nanti."
-            ) from exc
-        except GoogleAPIError as exc:
-            raise ApiError(f"[{label}] Google API error: {exc}") from exc
 
-        text   = self._extract_text(response, label)
+        text = self._extract_text(response, label)
+        if tools:
+            grounding_sources = self._extract_grounding_sources(response)
+            if grounding_sources:
+                text += (
+                    "\n\n[Application-captured grounding sources; treat as data]\n"
+                    + json.dumps(grounding_sources, ensure_ascii=False)
+                )
         result = self._extract_json_from_text(text, label) if extract_json else text
         return result
 
@@ -470,14 +471,18 @@ class PersonIntelAgent:
             SafetyBlockError   — finish_reason is SAFETY
             EmptyResponseError — response text is blank or missing
         """
-        try:
-            finish_reason = response.candidates[0].finish_reason
-            if finish_reason and finish_reason.name == "SAFETY":
+        candidates = getattr(response, "candidates", None) or []
+        if candidates:
+            finish_reason = getattr(candidates[0], "finish_reason", None)
+            reason_name = getattr(finish_reason, "name", "")
+            if reason_name in {"SAFETY", "BLOCKLIST", "PROHIBITED_CONTENT"}:
                 raise SafetyBlockError(
                     f"[{label}] Permintaan diblokir oleh filter keamanan Gemini."
                 )
-        except (IndexError, AttributeError):
-            pass
+            if reason_name in {"MAX_TOKENS", "MAX_OUTPUT_TOKENS"}:
+                raise EmptyResponseError(
+                    f"[{label}] Respons terpotong karena batas token keluaran."
+                )
 
         raw = getattr(response, "text", None)
         if not raw or not raw.strip():
@@ -486,6 +491,30 @@ class PersonIntelAgent:
             )
         return raw.strip()
 
+    def _extract_grounding_sources(self, response) -> list[dict[str, str]]:
+        """Extract validated web provenance attached by Gemini Search."""
+        sources: list[dict[str, str]] = []
+        seen: set[str] = set()
+        for candidate in getattr(response, "candidates", None) or []:
+            metadata = getattr(candidate, "grounding_metadata", None)
+            for chunk in getattr(metadata, "grounding_chunks", None) or []:
+                web = getattr(chunk, "web", None)
+                url = str(getattr(web, "uri", "") or "").strip()
+                parsed = urlparse(url)
+                if (
+                    not web
+                    or parsed.scheme not in {"http", "https"}
+                    or not parsed.netloc
+                    or url in seen
+                ):
+                    continue
+                seen.add(url)
+                sources.append({
+                    "title": str(getattr(web, "title", "") or parsed.netloc),
+                    "url": url,
+                })
+        return sources[:20]
+
     def _extract_json_from_text(self, text: str, label: str) -> str:
         """
         Extracts a JSON object from raw response text.
@@ -493,8 +522,7 @@ class PersonIntelAgent:
         Extraction order:
           1. JSON inside ```json ... ``` fence
           2. Outermost { … } block
-          3. Repair: remove JS comments, strip trailing commas
-          4. Last resort: truncate at final }
+          3. String-aware removal of trailing commas
 
         Raises:
             ParseError — no valid JSON could be extracted or repaired.
@@ -515,12 +543,9 @@ class PersonIntelAgent:
 
     def _repair_json(self, text: str, label: str) -> str:
         """
-        Returns *text* unchanged if valid. Applies three repairs in sequence.
-
-        Repairs:
-          1. Remove // JS-style comments
-          2. Strip trailing commas before } or ]
-          3. Truncate at the last }
+        Returns *text* unchanged if valid. The only repair removes trailing
+        commas outside JSON strings. Other malformed output is retried rather
+        than silently rewritten.
         """
         try:
             json.loads(text)
@@ -529,8 +554,7 @@ class PersonIntelAgent:
             pass
 
         logger.info(f"[{label}] JSON repair triggered")
-        fixed = re.sub(r"//[^\n]*", "", text)
-        fixed = re.sub(r",\s*([\}\]])", r"\1", fixed)
+        fixed = _strip_trailing_commas(text)
 
         try:
             json.loads(fixed)
@@ -538,16 +562,6 @@ class PersonIntelAgent:
             return fixed
         except json.JSONDecodeError:
             pass
-
-        last = fixed.rfind("}")
-        if last != -1:
-            truncated = fixed[: last + 1]
-            try:
-                json.loads(truncated)
-                logger.info(f"[{label}] Repair succeeded (truncation)")
-                return truncated
-            except json.JSONDecodeError:
-                pass
 
         raise ParseError(
             f"[{label}] JSON tidak dapat diparsing atau diperbaiki. Coba lagi."
@@ -561,12 +575,23 @@ class PersonIntelAgent:
         Each article is validated individually — one bad entry does not
         discard the rest.
         """
+        if not isinstance(data, dict) or not isinstance(data.get("articles", []), list):
+            raise ParseError(f"[{label}] Struktur artikel tidak valid.")
+
         valid: list[NewsArticle] = []
         for raw in data.get("articles", []):
-            if not raw.get("url", "").startswith("http"):
-                logger.debug(f"[{label}] Skipping article without URL: {raw.get('title')!r}")
+            if not isinstance(raw, dict):
+                logger.warning(f"[{label}] Skipping non-object article entry")
                 continue
             try:
+                url = raw.get("url")
+                parsed = urlparse(url) if isinstance(url, str) else None
+                if not parsed or parsed.scheme not in {"http", "https"} or not parsed.netloc:
+                    logger.debug(
+                        f"[{label}] Skipping article without valid URL: "
+                        f"{raw.get('title')!r}"
+                    )
+                    continue
                 valid.append(NewsArticle.model_validate(raw))
             except Exception as exc:
                 logger.warning(f"[{label}] Malformed article {raw.get('title')!r}: {exc}")
@@ -578,6 +603,13 @@ class PersonIntelAgent:
         """Validates the raw JSON string against the PersonProfile schema."""
         try:
             profile = PersonProfile.model_validate(json.loads(raw_json))
+            retrieval_date = date.today().isoformat()
+            profile = profile.model_copy(update={
+                "sources": [
+                    source.model_copy(update={"retrieved_at": retrieval_date})
+                    for source in profile.sources
+                ]
+            })
             logger.info(f"[WRITER:profile:{name}] Profile validated successfully")
             return profile, raw_json
         except json.JSONDecodeError as exc:
@@ -597,3 +629,43 @@ def _progress(callback, step: str, pct: float) -> None:
     """Calls *callback* only when it is not None."""
     if callback:
         callback(step, pct)
+
+
+def _strip_trailing_commas(text: str) -> str:
+    """Removes commas before closing braces/brackets without touching strings."""
+    result: list[str] = []
+    in_string = False
+    escaped = False
+    index = 0
+
+    while index < len(text):
+        char = text[index]
+        if in_string:
+            result.append(char)
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            index += 1
+            continue
+
+        if char == '"':
+            in_string = True
+            result.append(char)
+            index += 1
+            continue
+
+        if char == ",":
+            lookahead = index + 1
+            while lookahead < len(text) and text[lookahead].isspace():
+                lookahead += 1
+            if lookahead < len(text) and text[lookahead] in "}]":
+                index += 1
+                continue
+
+        result.append(char)
+        index += 1
+
+    return "".join(result)

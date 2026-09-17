@@ -69,7 +69,7 @@ def _render_card(article: NewsArticle) -> None:
             source_quality_badge(article.quality),
         ]
         if article.published_date:
-            meta_parts.append(f"🗓️ {escape(str(article.published_date))}")
+            meta_parts.append(escape(str(article.published_date)))
 
         st.markdown(
             " &nbsp;·&nbsp; ".join(meta_parts),
@@ -141,7 +141,7 @@ def render_news(
 
     with col_quality:
         selected_quality = st.selectbox(
-            label="",
+            label="Kualitas sumber",
             options=["Semua Sumber"] + present_qualities,
             key=f"{filter_key_prefix}_quality",
             label_visibility="collapsed",
@@ -149,8 +149,8 @@ def render_news(
 
     with col_search:
         search_query = st.text_input(
-            label="",
-            placeholder="🔍 Cari dalam judul atau ringkasan...",
+            label="Cari artikel",
+            placeholder="Cari dalam judul atau ringkasan",
             key=f"{filter_key_prefix}_search",
             label_visibility="collapsed",
         ).strip()
@@ -159,7 +159,7 @@ def render_news(
     filtered = _filter_articles(articles, selected_quality, search_query)
 
     if not filtered:
-        st.caption("⚠️ Tidak ada artikel yang cocok dengan filter.")
+        st.caption("Tidak ada artikel yang cocok dengan filter.")
         return
 
     st.caption(f"{len(filtered)} dari {len(articles)} artikel ditampilkan")

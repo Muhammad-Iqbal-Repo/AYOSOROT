@@ -16,9 +16,9 @@ from ui.components import confidence_badge, source_quality_badge
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _bool(value: bool | None) -> str:
-    if value is True:  return "✅ Ya"
-    if value is False: return "❌ Tidak"
-    return "❓"
+    if value is True:  return "Ya"
+    if value is False: return "Tidak"
+    return "Tidak diketahui"
 
 
 def _list(items: list) -> str:
@@ -26,9 +26,9 @@ def _list(items: list) -> str:
 
 
 def _alive(value: bool | None) -> str:
-    if value is True:  return "✅ Masih Hidup"
-    if value is False: return "❌ Meninggal"
-    return "❓ Tidak Diketahui"
+    if value is True:  return "Masih hidup"
+    if value is False: return "Meninggal"
+    return "Tidak diketahui"
 
 
 # ── Section builders ──────────────────────────────────────────────────────────
@@ -123,29 +123,29 @@ def render_comparison(profiles: list[PersonProfile]) -> None:
     _table_cfg = dict(use_container_width=True)
 
     # ── Overview ───────────────────────────────────────────────────────────────
-    st.subheader("👤 Ringkasan Umum")
+    st.subheader("Ringkasan umum")
     st.dataframe(_build_overview(profiles), **_table_cfg)
 
     st.divider()
 
     # ── Government flags ───────────────────────────────────────────────────────
-    st.subheader("🏛️ Klasifikasi Pejabat")
+    st.subheader("Klasifikasi pejabat")
     st.dataframe(_build_gov_flags(profiles), **_table_cfg)
 
     st.divider()
 
     # ── Roles & party ──────────────────────────────────────────────────────────
-    st.subheader("💼 Jabatan & Partai")
+    st.subheader("Jabatan dan partai")
     st.dataframe(_build_roles(profiles), **_table_cfg)
 
     st.divider()
 
     # ── TNI/Polri ──────────────────────────────────────────────────────────────
-    st.subheader("🎖️ TNI / POLRI")
+    st.subheader("TNI / POLRI")
     st.dataframe(_build_tni(profiles), **_table_cfg)
 
     st.divider()
 
     # ── Per-field confidence ───────────────────────────────────────────────────
-    st.subheader("📊 Tingkat Kepercayaan per Bidang")
+    st.subheader("Tingkat kepercayaan per bidang")
     st.dataframe(_build_confidence(profiles), **_table_cfg)

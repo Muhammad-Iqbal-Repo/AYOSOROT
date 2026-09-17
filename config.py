@@ -4,7 +4,7 @@ from dataclasses import dataclass
 # ── App identity ──────────────────────────────────────────────────────────────
 APP_NAME     = "SOROT"
 APP_SUBTITLE = "Sistem Observasi & Riset Online Tokoh"
-APP_ICON     = "🔦"
+APP_ICON     = "S"
 
 # ── Research dimensions ───────────────────────────────────────────────────────
 # Ordered dict: key -> (sidebar_label, prompt_text)
@@ -18,35 +18,35 @@ APP_ICON     = "🔦"
 # LinkedIn site: query targets the right person.
 RESEARCH_DIMENSIONS: dict[str, tuple[str, str]] = {
     "jabatan": (
-        "🏛️ Jabatan & Instansi",
+        "Jabatan dan instansi",
         "jabatan dan instansi tempat bekerja, saat ini maupun masa lalu",
     ),
     "partai": (
-        "🎯 Afiliasi Partai Politik",
+        "Afiliasi partai politik",
         "afiliasi dan keanggotaan partai politik",
     ),
     "keluarga": (
-        "👨‍👩‍👧 Relasi Keluarga",
+        "Relasi keluarga",
         "relasi dan anggota keluarga beserta peran publik mereka",
     ),
     "jabatan_khusus": (
-        "⭐ Klasifikasi Pejabat (Menteri / DPR / Staf Khusus)",
+        "Klasifikasi pejabat (Menteri / DPR / Staf Khusus)",
         "status sebagai Menteri, Wakil Menteri, Staf Khusus, Anggota DPR/DPRD/DPD",
     ),
     "tni_polri": (
-        "🎖️ Status TNI / POLRI",
+        "Status TNI / POLRI",
         "status TNI atau POLRI (aktif atau purnawirawan) beserta pangkat terakhir",
     ),
     "usaha": (
-        "🏢 Afiliasi Grup Usaha",
+        "Afiliasi grup usaha",
         "afiliasi grup usaha dan perusahaan sebagai komisaris, direktur, atau pemegang saham",
     ),
     "status_hidup": (
-        "❤️ Status Hidup / Meninggal",
+        "Status hidup / meninggal",
         "apakah masih hidup atau sudah meninggal dunia",
     ),
     "riwayat_pekerjaan": (
-        "💼 Riwayat Pekerjaan (LinkedIn & Umum)",
+        "Riwayat pekerjaan (LinkedIn dan umum)",
         (
             'cari profil LinkedIn dengan query: site:linkedin.com/in "{name}" '
             "lalu ekstrak riwayat pekerjaan lengkap — semua jenis pekerjaan "

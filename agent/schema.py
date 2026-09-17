@@ -13,7 +13,7 @@ Key design decisions
   partial response from Gemini.
 """
 from enum import Enum
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Optional
 
 
@@ -63,14 +63,14 @@ class ClaimEntry(BaseModel):
 
 class FieldConfidence(BaseModel):
     """Per-dimension confidence scores — one level per research category."""
-    jabatan:           ConfidenceLevel = ConfidenceLevel.MEDIUM
-    partai:            ConfidenceLevel = ConfidenceLevel.MEDIUM
-    keluarga:          ConfidenceLevel = ConfidenceLevel.MEDIUM
-    jabatan_khusus:    ConfidenceLevel = ConfidenceLevel.MEDIUM
-    tni_polri:         ConfidenceLevel = ConfidenceLevel.MEDIUM
-    usaha:             ConfidenceLevel = ConfidenceLevel.MEDIUM
-    status_hidup:      ConfidenceLevel = ConfidenceLevel.MEDIUM
-    riwayat_pekerjaan: ConfidenceLevel = ConfidenceLevel.MEDIUM
+    jabatan:           Optional[ConfidenceLevel] = None
+    partai:            Optional[ConfidenceLevel] = None
+    keluarga:          Optional[ConfidenceLevel] = None
+    jabatan_khusus:    Optional[ConfidenceLevel] = None
+    tni_polri:         Optional[ConfidenceLevel] = None
+    usaha:             Optional[ConfidenceLevel] = None
+    status_hidup:      Optional[ConfidenceLevel] = None
+    riwayat_pekerjaan: Optional[ConfidenceLevel] = None
 
 
 class FamilyMember(BaseModel):
@@ -87,7 +87,7 @@ class CorporateAffiliation(BaseModel):
 
 
 class TniPolriInfo(BaseModel):
-    is_tni_polri: bool           = False
+    is_tni_polri: Optional[bool] = None
     branch:       Optional[str]  = None   # e.g. "TNI AD", "POLRI"
     last_rank:    Optional[str]  = None   # e.g. "Jenderal"
     status:       Optional[str]  = None   # "Aktif" | "Purnawirawan"
@@ -110,6 +110,11 @@ class DisambiguationCandidate(BaseModel):
     description: str   # Short role/context: "Mantan Bupati Garut, Jawa Barat"
 
 
+class DisambiguationResponse(BaseModel):
+    """Structured-output envelope for the identity pre-check."""
+    candidates: list[DisambiguationCandidate] = Field(default_factory=list)
+
+
 # ── Root model ────────────────────────────────────────────────────────────────
 
 class PersonProfile(BaseModel):
@@ -128,12 +133,12 @@ class PersonProfile(BaseModel):
     job_history: list[JobEntry] = Field(default_factory=list)
 
     # Government classification flags
-    is_minister:       bool = False
-    is_deputy_minister: bool = False
-    is_dpr_member:     bool = False
-    is_dprd_member:    bool = False
-    is_staf_khusus:    bool = False
-    is_high_official:  bool = False
+    is_minister:        Optional[bool] = None
+    is_deputy_minister: Optional[bool] = None
+    is_dpr_member:      Optional[bool] = None
+    is_dprd_member:     Optional[bool] = None
+    is_staf_khusus:     Optional[bool] = None
+    is_high_official:   Optional[bool] = None
 
     # Military / police
     tni_polri: TniPolriInfo = Field(default_factory=TniPolriInfo)
@@ -153,6 +158,36 @@ class PersonProfile(BaseModel):
     claims:           list[ClaimEntry]   = Field(default_factory=list)
     field_confidence: FieldConfidence    = Field(default_factory=FieldConfidence)
     analyst_notes:    Optional[str]      = None
+
+    # Application-owned research context. These values are attached after the
+    # model response is validated and prevent different people with the same
+    # name, or different profile revisions, from sharing derived state.
+    identity_context:      Optional[str] = None
+    research_query:        Optional[str] = None
+    researched_dimensions: list[str] = Field(default_factory=list)
+    researched_at:         Optional[str] = None
+
+    @model_validator(mode="after")
+    def _validate_evidence_references(self):
+        source_ids = [
+            source.source_id or f"S{index + 1}"
+            for index, source in enumerate(self.sources)
+        ]
+        if len(source_ids) != len(set(source_ids)):
+            raise ValueError("source_id values must be unique")
+
+        known_ids = set(source_ids)
+        dangling = sorted({
+            evidence_id
+            for claim in self.claims
+            for evidence_id in claim.evidence_ids
+            if evidence_id not in known_ids
+        })
+        if dangling:
+            raise ValueError(
+                "claims reference unknown source_id values: " + ", ".join(dangling)
+            )
+        return self
 
 
 # Mapping of common Gemini variants → canonical SourceQuality values.
@@ -215,3 +250,8 @@ class NewsArticle(BaseModel):
         if isinstance(obj, dict) and "quality" in obj:
             obj = {**obj, "quality": _normalise_quality(obj["quality"])}
         return super().model_validate(obj, *args, **kwargs)
+
+
+class NewsResponse(BaseModel):
+    """Structured-output envelope for person and company news."""
+    articles: list[NewsArticle] = Field(default_factory=list)

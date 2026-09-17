@@ -1,13 +1,4 @@
-# ui/components.py
-"""
-Design system for SOROT.
-
-Contains:
-  - Color palette constants
-  - CSS injection (call inject_global_css() once in main())
-  - Badge and label primitives
-  - Layout helpers used across all renderers
-"""
+"""Shared visual primitives for the SOROT Streamlit interface."""
 from html import escape
 
 import streamlit as st
@@ -15,341 +6,212 @@ import streamlit as st
 from agent.schema import ConfidenceLevel, SourceQuality
 
 
-# ── Palette ───────────────────────────────────────────────────────────────────
-# Single source of truth for all colours used in the app.
-
 class Colors:
-    # Brand
-    PRIMARY       = "#1E3A5F"   # deep navy
-    PRIMARY_LIGHT = "#2E5299"   # mid blue
-    ACCENT        = "#F0A500"   # gold
-
-    # Semantic
-    SUCCESS  = "#1B7340"
-    WARNING  = "#B45309"
-    DANGER   = "#B91C1C"
-    MUTED    = "#6B7280"
-    SURFACE  = "#F8FAFC"
-
-    # Confidence levels
-    CONF_HIGH   = "#1B7340"   # green
-    CONF_MEDIUM = "#B45309"   # amber
-    CONF_LOW    = "#B91C1C"   # red
-
-    # Source quality
-    SRC_OFFICIAL     = "#1E3A5F"   # navy
-    SRC_NATIONAL     = "#1B7340"   # green
-    SRC_LOCAL        = "#5B21B6"   # violet
-    SRC_PROFESSIONAL = "#0E7490"   # teal
-    SRC_OTHER        = "#6B7280"   # grey
+    PRIMARY = "#1E3A5F"
+    PRIMARY_LIGHT = "#385777"
+    ACCENT = "#F0A500"
+    SUCCESS = "#1B7340"
+    WARNING = "#B45309"
+    DANGER = "#B91C1C"
+    MUTED = "#526172"
+    SURFACE = "#FFFFFF"
+    PAPER = "#F6F4EE"
+    INK = "#202C39"
+    BORDER = "#D8DDE3"
+    CONF_HIGH = SUCCESS
+    CONF_MEDIUM = WARNING
+    CONF_LOW = DANGER
+    SRC_OFFICIAL = PRIMARY
+    SRC_NATIONAL = SUCCESS
+    SRC_LOCAL = "#5B21B6"
+    SRC_PROFESSIONAL = "#0E7490"
+    SRC_OTHER = MUTED
 
 
 _CONFIDENCE_COLORS: dict[str, str] = {
-    ConfidenceLevel.HIGH:   Colors.CONF_HIGH,
+    ConfidenceLevel.HIGH: Colors.CONF_HIGH,
     ConfidenceLevel.MEDIUM: Colors.CONF_MEDIUM,
-    ConfidenceLevel.LOW:    Colors.CONF_LOW,
+    ConfidenceLevel.LOW: Colors.CONF_LOW,
 }
 
 _SOURCE_QUALITY_COLORS: dict[str, str] = {
-    SourceQuality.OFFICIAL:      Colors.SRC_OFFICIAL,
-    SourceQuality.NATIONAL:      Colors.SRC_NATIONAL,
-    SourceQuality.LOCAL:         Colors.SRC_LOCAL,
-    SourceQuality.PROFESSIONAL:  Colors.SRC_PROFESSIONAL,
-    SourceQuality.OTHER:         Colors.SRC_OTHER,
+    SourceQuality.OFFICIAL: Colors.SRC_OFFICIAL,
+    SourceQuality.NATIONAL: Colors.SRC_NATIONAL,
+    SourceQuality.LOCAL: Colors.SRC_LOCAL,
+    SourceQuality.PROFESSIONAL: Colors.SRC_PROFESSIONAL,
+    SourceQuality.OTHER: Colors.SRC_OTHER,
 }
 
 
-# ── Global CSS ────────────────────────────────────────────────────────────────
-
 _CSS = f"""
 <style>
-/* ── Sidebar background ──────────────────── */
+:root {{
+    --sorot-paper: {Colors.PAPER};
+    --sorot-surface: {Colors.SURFACE};
+    --sorot-ink: {Colors.INK};
+    --sorot-muted: {Colors.MUTED};
+    --sorot-navy: {Colors.PRIMARY};
+    --sorot-gold: {Colors.ACCENT};
+    --sorot-border: {Colors.BORDER};
+}}
+.stApp {{ background: var(--sorot-paper); color: var(--sorot-ink); }}
+.block-container {{ max-width: 1120px !important; padding-top: 1.75rem !important; }}
+h1, h2, h3, .sorot-masthead, .sorot-profile-name {{
+    font-family: Georgia, "Times New Roman", serif !important;
+    letter-spacing: -0.02em;
+}}
 [data-testid="stSidebar"] {{
-    background: linear-gradient(180deg, {Colors.PRIMARY} 0%, {Colors.PRIMARY_LIGHT} 100%);
+    background: #EEF0F2;
+    border-right: 1px solid var(--sorot-border);
 }}
-
-/* ── Sidebar text — nuclear selector to override all Streamlit inline styles ── */
-[data-testid="stSidebar"] * {{
-    color: #F1F5F9 !important;
-}}
-
-/* ── Sidebar checkboxes ──────────────────── */
-[data-testid="stSidebar"] .stCheckbox * {{
-    color: #FFFFFF !important;
-    font-size: 0.875rem !important;
-    font-weight: 500 !important;
-    line-height: 1.5 !important;
-}}
-/* Checkbox tick border */
-[data-testid="stSidebar"] [data-testid="stCheckbox"] > label > div:first-child {{
-    border-color: rgba(255,255,255,0.7) !important;
-    background: rgba(255,255,255,0.05) !important;
-}}
-[data-testid="stSidebar"] hr {{
-    border-color: rgba(255,255,255,0.2) !important;
-    margin: 8px 0 !important;
-}}
-
-/* ── Sidebar inputs — white background for readability ── */
-[data-testid="stSidebar"] input[type="password"],
-[data-testid="stSidebar"] input[type="text"] {{
-    background: #FFFFFF !important;
-    color: #1E3A5F !important;
-    border: 2px solid rgba(255,255,255,0.5) !important;
-    border-radius: 6px !important;
-    font-size: 0.85rem !important;
-}}
-[data-testid="stSidebar"] input[type="password"]::placeholder,
-[data-testid="stSidebar"] input[type="text"]::placeholder {{
-    color: #94A3B8 !important;
-}}
-
-/* ── Sidebar selectbox ───────────────────── */
-[data-testid="stSidebar"] [data-baseweb="select"] > div {{
-    background: #FFFFFF !important;
-    border: 2px solid rgba(255,255,255,0.5) !important;
-    border-radius: 6px !important;
-}}
-[data-testid="stSidebar"] [data-baseweb="select"] span,
-[data-testid="stSidebar"] [data-baseweb="select"] div {{
-    color: #1E3A5F !important;
-    font-size: 0.85rem !important;
-}}
-
-/* ── Sidebar buttons ─────────────────────── */
-[data-testid="stSidebar"] .stButton button {{
-    background: rgba(255,255,255,0.15) !important;
-    color: #F1F5F9 !important;
-    border: 1px solid rgba(255,255,255,0.3) !important;
-    border-radius: 6px !important;
-    font-size: 0.82rem !important;
-    transition: background 0.2s;
-}}
-[data-testid="stSidebar"] .stButton button:hover {{
-    background: rgba(255,255,255,0.28) !important;
-}}
-
-/* ── Sidebar section labels ──────────────── */
-.sidebar-section-label {{
-    font-size: 0.65rem;
+[data-testid="stSidebar"] hr {{ margin: 0.75rem 0 !important; }}
+.sidebar-brand {{
+    color: var(--sorot-navy);
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: 1.25rem;
     font-weight: 700;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    color: rgba(255,255,255,0.55) !important;
-    margin: 0 0 4px 0;
-    padding: 0;
-}}
-
-/* ── Main content ────────────────────────── */
-.block-container {{
-    padding-top: 1.5rem !important;
-    max-width: 1100px !important;
-}}
-
-/* ── Metric cards ────────────────────────── */
-.sorot-metric-row {{
-    display: flex;
-    gap: 12px;
-    flex-wrap: wrap;
-    margin: 12px 0;
-}}
-.sorot-metric {{
-    background: {Colors.SURFACE};
-    border: 1px solid #E2E8F0;
-    border-left: 4px solid {Colors.PRIMARY};
-    border-radius: 8px;
-    padding: 10px 16px;
-    min-width: 140px;
-    flex: 1;
-}}
-.sorot-metric-label {{
-    font-size: 0.7rem;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: {Colors.MUTED};
-    margin-bottom: 2px;
-}}
-.sorot-metric-value {{
-    font-size: 1rem;
-    font-weight: 600;
-    color: {Colors.PRIMARY};
-}}
-
-/* ── Summary card ────────────────────────── */
-.sorot-summary-card {{
-    background: linear-gradient(135deg, {Colors.PRIMARY} 0%, {Colors.PRIMARY_LIGHT} 100%);
-    color: white;
-    border-radius: 12px;
-    padding: 20px 24px;
-    margin-bottom: 16px;
-    line-height: 1.7;
-}}
-.sorot-summary-card p {{
-    margin: 0 0 10px 0;
-    font-size: 0.95rem;
-}}
-.sorot-summary-card p:last-child {{
-    margin-bottom: 0;
-}}
-
-/* ── Section headers ─────────────────────── */
-.sorot-section-header {{
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 6px 0;
-    border-bottom: 2px solid {Colors.PRIMARY};
-    margin-bottom: 10px;
-}}
-.sorot-section-title {{
-    font-size: 1rem;
-    font-weight: 600;
-    color: {Colors.PRIMARY};
     margin: 0;
 }}
-
-/* ── Search card ────────────────────────── */
-.sorot-search-card {{
-    background: #F8FAFC;
-    border: 1px solid #E2E8F0;
-    border-top: 4px solid #1E3A5F;
-    border-radius: 12px;
-    padding: 24px 28px 20px 28px;
-    margin-bottom: 8px;
-    box-shadow: 0 2px 8px rgba(30,58,95,0.07);
-}}
-.sorot-search-title {{
-    font-size: 1.05rem;
+.sidebar-section-label {{
+    color: var(--sorot-muted);
+    font-size: 0.72rem;
     font-weight: 700;
-    color: #1E3A5F;
-    margin: 0 0 4px 0;
+    letter-spacing: 0.08em;
+    margin: 0 0 0.35rem;
+    text-transform: uppercase;
 }}
-.sorot-search-subtitle {{
-    font-size: 0.82rem;
-    color: #6B7280;
-    margin: 0 0 16px 0;
+.sidebar-note {{ color: var(--sorot-muted); font-size: 0.78rem; margin: 0 0 0.5rem; }}
+button, input, [data-baseweb="select"] > div {{ border-radius: 4px !important; }}
+button:focus-visible, input:focus-visible, [tabindex]:focus-visible {{
+    outline: 3px solid rgba(240, 165, 0, 0.55) !important;
+    outline-offset: 2px !important;
 }}
-
-/* ── Search button ───────────────────────── */
+.stButton button, div[data-testid="stFormSubmitButton"] button {{ min-height: 44px; }}
 div[data-testid="stFormSubmitButton"] button {{
-    background: linear-gradient(135deg, {Colors.PRIMARY} 0%, {Colors.PRIMARY_LIGHT} 100%) !important;
-    color: white !important;
-    border: none !important;
-    border-radius: 8px !important;
-    font-weight: 600 !important;
-    letter-spacing: 0.03em !important;
-    padding: 0.6rem 1.5rem !important;
-    transition: opacity 0.2s !important;
+    background: var(--sorot-gold) !important;
+    border: 1px solid #D18F00 !important;
+    color: var(--sorot-navy) !important;
+    font-weight: 700 !important;
 }}
-div[data-testid="stFormSubmitButton"] button:hover {{
-    opacity: 0.9 !important;
+div[data-testid="stFormSubmitButton"] button:hover {{ background: #DFA000 !important; }}
+.sorot-masthead {{ color: var(--sorot-navy); font-size: 2rem; font-weight: 700; margin: 0; }}
+.sorot-kicker {{ color: var(--sorot-muted); font-size: 0.9rem; margin: 0.2rem 0 1rem; }}
+.sorot-search-card {{
+    background: var(--sorot-surface);
+    border: 1px solid var(--sorot-border);
+    border-radius: 6px;
+    margin-bottom: 1rem;
+    padding: 1.25rem 1.5rem;
 }}
-
-/* ── Tabs ────────────────────────────────── */
-.stTabs [data-baseweb="tab"] {{
-    font-size: 0.85rem;
-    padding: 8px 16px;
+.sorot-search-title {{ color: var(--sorot-navy); font-family: Georgia, serif; font-size: 1.3rem; font-weight: 700; margin: 0 0 0.25rem; }}
+.sorot-search-subtitle {{ color: var(--sorot-muted); font-size: 0.88rem; margin: 0; }}
+.stTabs [data-baseweb="tab-list"] {{ gap: 1.25rem; }}
+.stTabs [data-baseweb="tab"] {{ font-size: 0.9rem; padding: 0.65rem 0.15rem; }}
+.stTabs [aria-selected="true"] {{ color: var(--sorot-navy) !important; border-bottom-color: var(--sorot-gold) !important; }}
+.sorot-profile-name {{ color: var(--sorot-navy); font-size: 2rem; font-weight: 700; margin: 0; }}
+.sorot-metric-row {{
+    align-items: center;
+    border-bottom: 1px solid var(--sorot-border);
+    border-top: 1px solid var(--sorot-border);
+    display: flex;
+    flex-wrap: wrap;
+    margin: 1rem 0;
+    padding: 0.7rem 0;
 }}
-.stTabs [aria-selected="true"] {{
-    color: {Colors.PRIMARY} !important;
-    border-bottom-color: {Colors.PRIMARY} !important;
+.sorot-metric {{ border-right: 1px solid var(--sorot-border); min-width: 120px; padding: 0.1rem 1rem; }}
+.sorot-metric:first-child {{ padding-left: 0; }}
+.sorot-metric:last-child {{ border-right: 0; }}
+.sorot-metric-label {{ color: var(--sorot-muted); font-size: 0.7rem; letter-spacing: 0.05em; text-transform: uppercase; }}
+.sorot-metric-value {{ color: var(--sorot-navy); font-size: 1rem; font-weight: 700; }}
+.sorot-section-header {{ align-items: center; display: flex; gap: 0.5rem; margin: 0 0 0.75rem; }}
+.sorot-section-title {{ color: var(--sorot-navy); font-family: Georgia, serif; font-size: 1.12rem; font-weight: 700; }}
+.sorot-summary-card {{
+    background: #FFFDF8;
+    border: 1px solid var(--sorot-border);
+    border-left: 3px solid var(--sorot-gold);
+    color: var(--sorot-ink);
+    line-height: 1.75;
+    margin-bottom: 1rem;
+    max-width: 76ch;
+    padding: 1.2rem 1.4rem;
 }}
-
-/* ── Expander ────────────────────────────── */
-details summary {{
-    font-weight: 600;
-    color: {Colors.PRIMARY};
+.sorot-summary-card p {{ margin: 0 0 0.8rem; }}
+.sorot-summary-card p:last-child {{ margin-bottom: 0; }}
+.sorot-graph-legend {{ display: flex; flex-wrap: wrap; gap: 1rem; color: var(--sorot-muted); font-size: 0.78rem; margin: 0 0 0.5rem; }}
+details summary {{ color: var(--sorot-navy); font-weight: 600; }}
+@media (max-width: 720px) {{
+    .block-container {{ padding-left: 1rem !important; padding-right: 1rem !important; }}
+    .sorot-masthead, .sorot-profile-name {{ font-size: 1.65rem; }}
+    .sorot-search-card {{ padding: 1rem; }}
+    .sorot-metric {{ border-bottom: 1px solid var(--sorot-border); border-right: 0; flex: 1 1 45%; padding: 0.5rem 0; }}
+    .stTabs [data-baseweb="tab-list"] {{ gap: 0.75rem; overflow-x: auto; }}
 }}
 </style>
 """
 
 
 def inject_global_css() -> None:
-    """Injects the global SOROT stylesheet. Call once in main()."""
+    """Inject the global SOROT stylesheet once from the app entry point."""
     st.markdown(_CSS, unsafe_allow_html=True)
 
 
-# ── Badge primitives ──────────────────────────────────────────────────────────
-
 def badge(text: str, color: str, text_color: str = "white") -> str:
-    """Returns an inline HTML pill badge."""
-    safe_text = escape(str(text))
-    safe_color = escape(str(color), quote=True)
-    safe_text_color = escape(str(text_color), quote=True)
+    """Return a compact inline HTML badge."""
     return (
-        f'<span style="'
-        f"background:{safe_color};color:{safe_text_color};"
-        f"padding:2px 10px;border-radius:20px;"
-        f'font-size:0.75em;font-weight:600;margin:2px;display:inline-block">'
-        f"{safe_text}</span>"
+        '<span style="'
+        f"background:{escape(str(color), quote=True)};"
+        f"color:{escape(str(text_color), quote=True)};"
+        'padding:2px 8px;border-radius:4px;font-size:0.75em;'
+        'font-weight:600;margin:2px;display:inline-block">'
+        f"{escape(str(text))}</span>"
     )
 
 
 def confidence_badge(level: str) -> str:
-    """Returns a badge styled for a ConfidenceLevel value."""
     color = _CONFIDENCE_COLORS.get(level, Colors.MUTED)
-    return badge(level.upper() if level else "UNKNOWN", color)
+    return badge(level.upper() if level else "BELUM DINILAI", color)
 
 
 def source_quality_badge(quality: str) -> str:
-    """Returns a badge styled for a SourceQuality value."""
-    color = _SOURCE_QUALITY_COLORS.get(quality, Colors.MUTED)
-    return badge(quality, color)
+    return badge(quality, _SOURCE_QUALITY_COLORS.get(quality, Colors.MUTED))
 
 
-def flag_badge(label: str, active: bool) -> str:
-    """Returns a classification flag badge — filled when active, grey outline when not."""
+def flag_badge(label: str, active: bool | None) -> str:
     if active:
-        return badge(f"✓ {label}", Colors.PRIMARY)
-    return badge(label, "#E2E8F0", Colors.MUTED)
+        return badge(f"Ya: {label}", Colors.PRIMARY)
+    if active is None:
+        return badge(f"{label}: Tidak diketahui", "#E2E8F0", Colors.MUTED)
+    return badge(f"Tidak: {label}", "#E2E8F0", Colors.MUTED)
 
-
-# ── Layout helpers ────────────────────────────────────────────────────────────
 
 def section_header(icon: str, title: str, confidence: str | None = None) -> None:
-    """
-    Renders a styled section header with an optional confidence badge.
-
-    Args:
-        icon:       Emoji prefix.
-        title:      Section title text.
-        confidence: Optional ConfidenceLevel string shown as a badge.
-    """
-    conf_html = f"&nbsp;{confidence_badge(confidence)}" if confidence else ""
-    safe_icon = escape(str(icon))
-    safe_title = escape(str(title))
+    """Render an editorial section heading with optional confidence."""
+    icon_html = f'<span aria-hidden="true">{escape(str(icon))}</span>' if icon else ""
+    confidence_html = f" {confidence_badge(confidence)}" if confidence else ""
     st.markdown(
-        f'<div class="sorot-section-header">'
-        f'<span style="font-size:1.1em">{safe_icon}</span>'
-        f'<span class="sorot-section-title">{safe_title}</span>'
-        f"{conf_html}"
-        f"</div>",
+        '<div class="sorot-section-header">'
+        f"{icon_html}<span class=\"sorot-section-title\">{escape(str(title))}</span>"
+        f"{confidence_html}</div>",
         unsafe_allow_html=True,
     )
 
 
 def metric_card(label: str, value: str) -> str:
-    """Returns an HTML metric card string."""
-    safe_label = escape(str(label))
-    safe_value = escape(str(value))
     return (
-        f'<div class="sorot-metric">'
-        f'<div class="sorot-metric-label">{safe_label}</div>'
-        f'<div class="sorot-metric-value">{safe_value}</div>'
-        f"</div>"
+        '<div class="sorot-metric">'
+        f'<div class="sorot-metric-label">{escape(str(label))}</div>'
+        f'<div class="sorot-metric-value">{escape(str(value))}</div>'
+        "</div>"
     )
 
 
 def empty_state(message: str = "Tidak ditemukan") -> None:
-    """Renders a muted caption for empty data sections."""
-    safe_message = escape(str(message))
     st.markdown(
         f'<p style="color:{Colors.MUTED};font-style:italic;font-size:0.85rem">'
-        f"{safe_message}</p>",
+        f"{escape(str(message))}</p>",
         unsafe_allow_html=True,
     )
 
 
 def confidence_color(level: str) -> str:
-    """Maps a ConfidenceLevel string to a CSS colour."""
     return _CONFIDENCE_COLORS.get(level, Colors.MUTED)
