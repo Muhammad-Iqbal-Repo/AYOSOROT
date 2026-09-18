@@ -69,10 +69,10 @@ def _build_network(profile: PersonProfile) -> Network:
     net.add_node(
         subject,
         label=subject,
-        color=_NODE_COLORS["person"],
+        color={"background": _NODE_COLORS["person"], "border": "#1E3A5F"},
         size=30,
         title=f"<b>Tokoh: {escape(subject)}</b>",
-        font={"size": 16},
+        font={"size": 16, "color": "#1E3A5F"},
         shape="dot",
     )
 

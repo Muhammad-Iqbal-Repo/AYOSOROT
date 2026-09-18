@@ -95,7 +95,8 @@ def _source_chip(source_id: str, source: SourceEntry) -> str:
     """Returns one clickable evidence chip."""
     url = _safe_http_url(source.url)
     domain = urlparse(url).netloc.replace("www.", "") if url else ""
-    label = source.title or domain or source_id
+    source_label = source.title or domain or "Sumber"
+    label = f"{source_id} · {source_label}"
     if len(label) > 28:
         label = f"{label[:25]}..."
 
@@ -568,23 +569,25 @@ def render_profile_header(profile: PersonProfile) -> None:
 
 def render_profile_details(profile: PersonProfile) -> None:
     """Render all evidence sections below the profile identity."""
+    st.caption(
+        "Label keyakinan pada tiap bagian adalah penilaian model, "
+        "bukan verifikasi independen."
+    )
     _render_classification_flags(profile)
+    st.divider()
+
+    _render_roles(profile)
+
     st.divider()
 
     col1, col2 = st.columns(2)
     with col1:
-        _render_roles(profile)
-    with col2:
         _render_party(profile)
+    with col2:
+        _render_tni(profile)
 
     st.divider()
-
-    col3, col4 = st.columns(2)
-    with col3:
-        _render_tni(profile)
-    with col4:
-        _render_corporate(profile)
-
+    _render_corporate(profile)
     st.divider()
     _render_family(profile)
     st.divider()

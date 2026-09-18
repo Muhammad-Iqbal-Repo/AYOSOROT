@@ -56,7 +56,7 @@ _CSS = f"""
 }}
 .stApp {{ background: var(--sorot-paper); color: var(--sorot-ink); }}
 .block-container {{ max-width: 1120px !important; padding-top: 1.75rem !important; }}
-h1, h2, h3, .sorot-masthead, .sorot-profile-name {{
+h1, h2, .sorot-masthead, .sorot-profile-name {{
     font-family: Georgia, "Times New Roman", serif !important;
     letter-spacing: -0.02em;
 }}
@@ -83,13 +83,14 @@ h1, h2, h3, .sorot-masthead, .sorot-profile-name {{
 .sidebar-note {{ color: var(--sorot-muted); font-size: 0.78rem; margin: 0 0 0.5rem; }}
 button, input, [data-baseweb="select"] > div {{ border-radius: 4px !important; }}
 button:focus-visible, input:focus-visible, [tabindex]:focus-visible {{
-    outline: 3px solid rgba(240, 165, 0, 0.55) !important;
+    outline: 3px solid var(--sorot-navy) !important;
     outline-offset: 2px !important;
 }}
+.stTextInput input, [data-baseweb="select"] > div {{ border-color: #78818C !important; }}
 .stButton button, div[data-testid="stFormSubmitButton"] button {{ min-height: 44px; }}
 div[data-testid="stFormSubmitButton"] button {{
     background: var(--sorot-gold) !important;
-    border: 1px solid #D18F00 !important;
+    border: 1px solid var(--sorot-navy) !important;
     color: var(--sorot-navy) !important;
     font-weight: 700 !important;
 }}
@@ -124,7 +125,7 @@ div[data-testid="stFormSubmitButton"] button:hover {{ background: #DFA000 !impor
 .sorot-metric-label {{ color: var(--sorot-muted); font-size: 0.7rem; letter-spacing: 0.05em; text-transform: uppercase; }}
 .sorot-metric-value {{ color: var(--sorot-navy); font-size: 1rem; font-weight: 700; }}
 .sorot-section-header {{ align-items: center; display: flex; gap: 0.5rem; margin: 0 0 0.75rem; }}
-.sorot-section-title {{ color: var(--sorot-navy); font-family: Georgia, serif; font-size: 1.12rem; font-weight: 700; }}
+.sorot-section-title {{ color: var(--sorot-navy); font-size: 1.12rem; font-weight: 700; }}
 .sorot-summary-card {{
     background: #FFFDF8;
     border: 1px solid var(--sorot-border);
@@ -190,7 +191,7 @@ def section_header(icon: str, title: str, confidence: str | None = None) -> None
     confidence_html = f" {confidence_badge(confidence)}" if confidence else ""
     st.markdown(
         '<div class="sorot-section-header">'
-        f"{icon_html}<span class=\"sorot-section-title\">{escape(str(title))}</span>"
+        f"{icon_html}<h3 class=\"sorot-section-title\">{escape(str(title))}</h3>"
         f"{confidence_html}</div>",
         unsafe_allow_html=True,
     )

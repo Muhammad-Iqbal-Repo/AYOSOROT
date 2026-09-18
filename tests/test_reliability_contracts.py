@@ -5,6 +5,7 @@ from unittest.mock import Mock, patch
 import pandas as pd
 from google.genai import errors as genai_errors
 
+from agent import orchestrator
 from agent.exceptions import (
     EmptyResponseError,
     ParseError,
@@ -19,6 +20,16 @@ from ui.report_renderer import _apply_filter, _claims_for
 class AgentReliabilityTests(unittest.TestCase):
     def setUp(self):
         self.agent = PersonIntelAgent.__new__(PersonIntelAgent)
+
+    def test_configured_output_token_budgets_are_doubled(self):
+        self.assertEqual(orchestrator._SEARCHER_MAX_TOKENS, 6000)
+        self.assertEqual(orchestrator._WRITER_MAX_TOKENS, 5000)
+        self.assertEqual(orchestrator._NEWS_SEARCHER_TOKENS, 8000)
+        self.assertEqual(orchestrator._NEWS_WRITER_TOKENS, 6000)
+        self.assertEqual(orchestrator._DISAMBIG_TOKENS, 800)
+        self.assertEqual(orchestrator._SUMMARY_MAX_TOKENS, 3000)
+        self.assertEqual(orchestrator._THINKING_MAX_TOKENS, 16000)
+        self.assertEqual(orchestrator._TOKEN_INCREMENT, 2000)
 
     def test_json_repair_preserves_urls_when_removing_trailing_comma(self):
         repaired = self.agent._repair_json(
@@ -160,7 +171,7 @@ class AgentReliabilityTests(unittest.TestCase):
             call.kwargs["config"].max_output_tokens
             for call in self.agent._client.models.generate_content.call_args_list
         ]
-        self.assertEqual(budgets, [8000, 9000, 10000])
+        self.assertEqual(budgets, [16000, 18000, 20000])
 
     def test_structured_tasks_pass_their_pydantic_response_schema(self):
         self.agent._writer_model = "test-model"

@@ -76,20 +76,20 @@ from utils.logger import get_logger
 logger = get_logger(__name__)
 
 # Token caps per call type
-_SEARCHER_MAX_TOKENS  = 3000
-_WRITER_MAX_TOKENS    = 2500   # structured JSON
-_NEWS_SEARCHER_TOKENS = 4000
-_NEWS_WRITER_TOKENS   = 3000
-_DISAMBIG_TOKENS      = 400
-_SUMMARY_MAX_TOKENS   = 1500
+_SEARCHER_MAX_TOKENS  = 6000
+_WRITER_MAX_TOKENS    = 5000   # structured JSON
+_NEWS_SEARCHER_TOKENS = 8000
+_NEWS_WRITER_TOKENS   = 6000
+_DISAMBIG_TOKENS      = 800
+_SUMMARY_MAX_TOKENS   = 3000
 
 # Thinking model token cap — much higher because thinking tokens count
 # against the budget before a single output token is produced.
-_THINKING_MAX_TOKENS  = 8000
+_THINKING_MAX_TOKENS  = 16000
 
 # Writer empty-response retry config
 _MAX_WRITER_RETRIES  = 3
-_TOKEN_INCREMENT     = 1000   # larger increment for thinking models
+_TOKEN_INCREMENT     = 2000   # larger increment for thinking models
 _TEMP_INCREMENT      = 0.1
 _RETRY_DELAY_SEC     = 3.0    # thinking models are slower; wait longer
 
@@ -220,7 +220,7 @@ class PersonIntelAgent:
             ConfigurationError, QuotaExceededError, SafetyBlockError,
             EmptyResponseError, ParseError, ApiError
         """
-        _progress(progress_callback, "🔍 [Agen Pencari] Menelusuri sumber publik...", 0.15)
+        _progress(progress_callback, "Menelusuri sumber publik...", 0.15)
 
         raw_findings = self._call_searcher(
             prompt=build_searcher_prompt(name, selected_keys),
@@ -230,7 +230,7 @@ class PersonIntelAgent:
         )
         logger.info(f"[SEARCHER:profile:{name}] {len(raw_findings)} chars returned")
 
-        _progress(progress_callback, "✍️ [Agen Penulis] Menyusun profil terstruktur...", 0.6)
+        _progress(progress_callback, "Menyusun profil terstruktur...", 0.6)
 
         raw_json = self._call_writer(
             prompt=build_writer_prompt(name, raw_findings, selected_keys),

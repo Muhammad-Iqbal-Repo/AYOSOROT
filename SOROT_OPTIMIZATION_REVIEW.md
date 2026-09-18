@@ -6,7 +6,27 @@ Reviewed: 2026-09-17. Scope: the current local Python application, its tests, de
 
 Keep the existing Streamlit application and Searcher → Writer pipeline. The highest-value work is to correct failure handling and misleading research results, eliminate avoidable model calls, and make session state consistent. A framework rewrite, additional agent stages, or a database migration is not required to achieve these improvements.
 
-This document is a review and implementation backlog; application code has not been changed. Priorities reflect observable defects and likely user impact, not measured production latency or cost. Deployment audience and performance targets are unknown; the server-key finding is especially important if other people can access the app.
+This document began as a review and implementation backlog. The implementation record below reflects the local changes applied on 2026-09-17. Priorities reflect observable defects and likely user impact, not measured production latency or cost. Deployment audience and performance targets remain unknown.
+
+## Implementation record
+
+Applied locally:
+
+- R1–R11 correctness, credential, identity, cache, unknown-state, evidence, and escaping changes, with synthetic regression coverage.
+- R12 effective retry budgets, typed Gemini SDK error translation, JSON structured-output schemas, and `generateContent` model filtering.
+- R13 stateful active-tab rendering, in-memory graph HTML with inline resources, and a table alternative for graph relations.
+- R14 runnable-app documentation, an explicit inactive-history boundary, and tested direct dependency versions in `requirements.lock`.
+- UI-1–UI-5 using the documented warm-paper, navy, and gold editorial direction; research scope now precedes technical configuration, decorative emoji and gradients were removed, profile metadata was reduced, and controls have visible focus and responsive rules.
+
+Verification completed after implementation: `python -m pytest -q` passed 36 tests; project modules compiled successfully; and the active virtual environment reported no broken requirements with `pip check`. AppTest covers safe server-key handling, first/repeated search behavior, disambiguation context, and the updated control labels.
+
+Still requires deployment or external-system evidence:
+
+- A connected real browser was unavailable in the implementation session, so desktop/mobile resizing, keyboard traversal, zoom, source-link navigation, graph interaction, and computed-style contrast were not certified.
+- No paid Gemini request was made. Search-tool compatibility beyond the SDK's advertised `generateContent` action, live structured output, grounding metadata, token usage, and latency still need a controlled smoke test.
+- A clean environment was not created from scratch. `requirements.lock` records the direct tested set, while transitive reproducibility still depends on the package resolver.
+- No representative traffic baseline exists for TTLs, session limits, p50/p95 latency, or cost targets. Those values were not invented.
+- Supabase history remains inactive. Its multi-user access and deletion model must be designed and tested before activation.
 
 The older `SOROT_IMPROVEMENT_RECOMMENDATIONS.md` contains findings that have already been addressed. `_TEMP_INCREMENT` exists, empty news uses `{"articles": []}`, summaries and badges escape HTML, the environment API key is recognized, and source/claim models and evidence chips exist. Preserve these improvements and their tests. Use this review for the remaining work.
 

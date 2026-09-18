@@ -27,7 +27,7 @@ class AgentContractTests(unittest.TestCase):
                 agent._call_writer("prompt", 10, "TEST")
 
         self.assertEqual(len(calls), 3)
-        self.assertEqual([call["max_tokens"] for call in calls], [10, 1010, 2010])
+        self.assertEqual([call["max_tokens"] for call in calls], [10, 2010, 4010])
         self.assertGreater(calls[-1]["temperature"], calls[0]["temperature"])
 
     def test_news_empty_result_contract_uses_articles_object(self):

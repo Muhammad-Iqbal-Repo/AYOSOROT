@@ -54,7 +54,7 @@ def _safe_http_url(url: str | None) -> str:
 
 def _render_card(article: NewsArticle) -> None:
     """Renders one article as a styled bordered card."""
-    with st.container(border=True):
+    with st.container():
         # Title — linked when a URL is present
         title = _escape_markdown(article.title)
         safe_url = _safe_http_url(article.url)
@@ -78,6 +78,7 @@ def _render_card(article: NewsArticle) -> None:
 
         # Summary body
         st.markdown(_escape_markdown(article.summary))
+        st.divider()
 
 
 # ── Filter helper ─────────────────────────────────────────────────────────────

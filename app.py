@@ -163,7 +163,10 @@ def _sidebar() -> list[str]:
                 selected.append(key)
 
         st.divider()
-        with st.expander("API dan model"):
+        with st.expander(
+            "API dan model",
+            expanded=not bool(_server_api_key() or st.session_state.get("api_key")),
+        ):
             user_api_key = st.text_input(
                 "Google AI Studio API key",
                 type="password",
@@ -416,7 +419,7 @@ def _resume_after_disambiguation(selected_keys: list[str]) -> None:
     chosen_label = st.radio("Pilih tokoh:", list(options.keys()), key="disambiguation")
     selection = options[chosen_label]
 
-    if st.button("Lanjutkan pencarian", key="disambig_confirm", use_container_width=True):
+    if st.button("Telusuri pilihan ini", key="disambig_confirm", use_container_width=True):
         _remember_identity_resolution(
             name,
             selection["query"],
