@@ -2,6 +2,8 @@
 
 SOROT is a Streamlit workspace for researching public information about Indonesian figures. It builds an evidence-linked profile with Gemini, then supports comparison, current-news retrieval, and relationship exploration.
 
+Profile research searches selected topics in up to three focused groups: public roles and affiliations, work and business, and family. The writer receives findings from each group, with a 24,000-token input cap checked using Gemini's token counter. If findings exceed the cap, each group's text is shortened proportionally so every selected group remains represented. Selecting more groups can increase search requests, latency, and API usage.
+
 ## Requirements
 
 - Python 3.11

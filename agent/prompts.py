@@ -206,7 +206,7 @@ def build_searcher_prompt(name: str, selected_keys: list[str] | None = None) -> 
     Returns:
         Plain-text prompt ready to send to the Searcher with search tool enabled.
     """
-    keys = selected_keys or list(RESEARCH_DIMENSIONS.keys())
+    keys = selected_keys if selected_keys is not None else list(RESEARCH_DIMENSIONS.keys())
 
     dimensions_text = "\n".join(
         f"  {i + 1}. {RESEARCH_DIMENSIONS[k][1].format(name=name)}"
@@ -220,10 +220,13 @@ def build_searcher_prompt(name: str, selected_keys: list[str] | None = None) -> 
         f"Cari dan kumpulkan semua fakta yang tersedia tentang:\n"
         f"{dimensions_text}\n\n"
         f"Instruksi:\n"
-        f"- Gunakan beberapa query pencarian berbeda untuk memaksimalkan temuan\n"
-        f"- Kumpulkan fakta dari sumber publik yang dapat diverifikasi\n"
-        f"- Sertakan nama sumber dan URL untuk setiap fakta yang ditemukan\n"
-        f"- Tulis semua temuan sebagai teks biasa yang terstruktur\n"
+        f"- Gunakan beberapa query spesifik untuk nama, jabatan, instansi, dan topik di atas\n"
+        f"- Pastikan setiap hasil merujuk pada orang yang sama; pisahkan atau abaikan nama serupa\n"
+        f"- Utamakan dokumen resmi dan sumber primer; verifikasi klaim penting dengan sumber independen\n"
+        f"- Pilih fakta relevan yang berbeda, bukan cuplikan duplikat atau halaman agregator\n"
+        f"- Untuk tiap fakta catat nama sumber, URL halaman, dan tanggal peristiwa bila tersedia\n"
+        f"- Jangan menyimpulkan fakta dari judul atau cuplikan yang tidak mendukungnya\n"
+        f"- Tulis temuan singkat sebagai teks biasa terstruktur per topik; letakkan URL tepat setelah fakta\n"
         f"- JANGAN format sebagai JSON — cukup tulis semua fakta yang ditemukan\n"
         f"- Jika suatu informasi tidak ditemukan, tulis 'Tidak ditemukan'\n\n"
         f"Format output:\n"
