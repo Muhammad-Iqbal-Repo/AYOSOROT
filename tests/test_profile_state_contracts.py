@@ -1,4 +1,5 @@
 import unittest
+from datetime import datetime, timedelta, timezone
 
 from pydantic import ValidationError
 
@@ -8,6 +9,7 @@ from ui.report_renderer import _dimension_researched, _job_history_rows
 from utils.cache import (
     build_profile_cache_key,
     clear_research_state,
+    get_cached_news,
     profile_revision,
     profile_session_label,
 )
@@ -87,6 +89,15 @@ class ProfileKnowledgeStateTests(unittest.TestCase):
 
 
 class ProfileStateKeyTests(unittest.TestCase):
+    def test_news_cache_expires_after_six_hours(self):
+        key = "news_person_example"
+        state = {key: [], f"news_cached_at_{key}": datetime.now(timezone.utc) - timedelta(hours=7)}
+
+        self.assertIsNone(get_cached_news(key, state))
+
+        state[f"news_cached_at_{key}"] = datetime.now(timezone.utc)
+        self.assertEqual(get_cached_news(key, state), [])
+
     def test_cache_key_includes_identity_dimensions_and_models(self):
         base = build_profile_cache_key(
             "Alex Example, Mayor of North",

@@ -123,7 +123,7 @@ def _claim_sources_html(profile: PersonProfile, field: str, value: str | None = 
     """Returns source chips for claims linked to a field/value pair."""
     claims = _claims_for(profile, field, value)
     if not claims:
-        return ""
+        return badge("Belum terverifikasi", "#E2E8F0", Colors.MUTED)
 
     lookup = _source_lookup(profile)
     seen: set[str] = set()
@@ -137,7 +137,7 @@ def _claim_sources_html(profile: PersonProfile, field: str, value: str | None = 
 
     if chips:
         return " ".join(chips)
-    return badge("Tanpa sumber eksplisit", "#E2E8F0", Colors.MUTED)
+    return badge("Belum terverifikasi", "#E2E8F0", Colors.MUTED)
 
 
 def _render_evidence_row(label: str, value: str, chips_html: str = "") -> None:

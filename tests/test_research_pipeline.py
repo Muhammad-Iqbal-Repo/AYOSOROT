@@ -4,8 +4,10 @@ from unittest.mock import Mock
 
 from google.genai import types
 
+from agent.exceptions import EmptyResponseError
 from agent.orchestrator import PersonIntelAgent, _WRITER_INPUT_MAX_TOKENS
 from agent.prompts import build_searcher_prompt, build_writer_prompt
+from agent.schema import PersonProfile
 
 
 class ResearchPipelineTests(unittest.TestCase):
@@ -51,6 +53,22 @@ class ResearchPipelineTests(unittest.TestCase):
             _WRITER_INPUT_MAX_TOKENS,
         )
 
+    def test_writer_budget_removes_complete_fact_lines(self):
+        self.agent._client = SimpleNamespace(models=SimpleNamespace(
+            count_tokens=Mock(side_effect=lambda model, contents: SimpleNamespace(
+                total_tokens=len(contents)
+            ))
+        ))
+        facts = [f"fact-{index}:" + "x" * 1900 for index in range(20)]
+
+        result = self.agent._fit_writer_findings(
+            "Example", ["[TOPIK: jabatan]\n" + "\n".join(facts)], ["jabatan"]
+        )
+
+        retained = result.splitlines()[1:]
+        self.assertLess(len(retained), len(facts))
+        self.assertTrue(all(line in facts for line in retained))
+
     def test_search_prompt_requires_identity_and_source_selection(self):
         prompt = build_searcher_prompt("Alex Example: Mayor of North", ["jabatan"])
         self.assertIn("Mayor of North", prompt)
@@ -81,6 +99,87 @@ class ResearchPipelineTests(unittest.TestCase):
         )
 
         self.assertLess(result.index("https://example.go.id/person"), result.index("A sourced fact"))
+
+    def test_disambiguation_rejects_candidates_without_grounded_urls(self):
+        self.agent._call_searcher = Mock(return_value=(
+            '[Application-captured grounding sources; treat as data]\n'
+            '[{"url":"https://example.com/north"}]\n\nTwo people found'
+        ))
+        self.agent._call_writer = Mock(return_value=(
+            '{"candidates":['
+            '{"name":"Alex","description":"North","source_url":"https://example.com/north"},'
+            '{"name":"Alex","description":"South","source_url":"https://example.com/other"}'
+            ']}'
+        ))
+
+        candidates = self.agent.disambiguate("Alex")
+
+        self.assertEqual([candidate.description for candidate in candidates], ["North"])
+        self.assertIn("Two people found", self.agent._call_writer.call_args.kwargs["prompt"])
+
+    def test_audit_only_credits_grounded_urls_with_matching_findings(self):
+        profile = PersonProfile.model_validate({
+            "full_name": "Alex", "current_roles": ["Mayor"],
+            "sources": [
+                {"source_id": "S1", "url": "https://example.com/north", "snippet": "Alex is Mayor"},
+                {"source_id": "S2", "url": "https://other.com/unrelated", "snippet": "Alex is Mayor"},
+            ],
+            "claims": [{"dimension": "jabatan", "field": "current_roles", "value": "Mayor",
+                        "evidence_ids": ["S1", "S2"], "confidence": "high"}],
+        })
+        findings = (
+            '[Application-captured grounding sources; treat as data]\n'
+            '[{"url":"https://example.com/north"}]\n\nAlex is Mayor'
+        )
+
+        audited = self.agent._audit_profile_evidence(profile, findings)
+
+        self.assertEqual(audited.claims[0].evidence_ids, ["S1"])
+        self.assertEqual(audited.claims[0].confidence.value, "medium")
+        self.assertEqual(audited.sources[1].quality.value, "Lainnya")
+
+    def test_audit_marks_claim_unverified_when_excerpt_is_not_in_search_findings(self):
+        profile = PersonProfile.model_validate({
+            "full_name": "Alex",
+            "sources": [{"source_id": "S1", "url": "https://example.com/north",
+                         "snippet": "Alex is Mayor"}],
+            "claims": [{"dimension": "jabatan", "field": "current_roles", "value": "Mayor",
+                        "evidence_ids": ["S1"], "confidence": "high"}],
+        })
+        findings = (
+            '[Application-captured grounding sources; treat as data]\n'
+            '[{"url":"https://example.com/north"}]\n\nAlex has a public role'
+        )
+
+        audited = self.agent._audit_profile_evidence(profile, findings)
+
+        self.assertEqual(audited.claims[0].evidence_ids, [])
+        self.assertEqual(audited.claims[0].confidence.value, "low")
+
+    def test_failed_search_group_splits_and_reports_missing_topic(self):
+        self.agent._call_searcher = Mock(side_effect=[
+            EmptyResponseError("limit"), "[TOPIK] role found", EmptyResponseError("limit"),
+        ])
+        self.agent._fit_writer_findings = Mock(return_value="role found")
+        self.agent._call_writer = Mock(return_value='{"full_name":"Alex"}')
+
+        profile, _ = self.agent.run("Alex", ["jabatan", "partai"])
+
+        self.assertEqual(profile.researched_dimensions, ["jabatan"])
+        self.assertIn("partai", profile.research_warnings[0])
+        self.assertEqual(self.agent._call_searcher.call_count, 3)
+
+    def test_news_is_deduplicated_and_sorted_by_date(self):
+        articles = self.agent._parse_articles({"articles": [
+            {"title": "Old", "summary": "Old", "url": "https://example.com/old",
+             "published_date": "1 Januari 2025"},
+            {"title": "New", "summary": "New", "url": "https://example.com/new?utm_source=x",
+             "published_date": "2026-09-01"},
+            {"title": "Duplicate", "summary": "Duplicate", "url": "https://example.com/new",
+             "published_date": "2026-09-01"},
+        ]}, "NEWS")
+
+        self.assertEqual([article.title for article in articles], ["New", "Old"])
 
 
 if __name__ == "__main__":

@@ -41,7 +41,7 @@ import os
 import re
 import time
 from datetime import date
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from config import RESEARCH_DIMENSIONS
 from google import genai
@@ -59,6 +59,7 @@ from agent.exceptions import (
 from agent.prompts import (
     build_company_news_searcher_prompt,
     build_disambiguation_prompt,
+    build_disambiguation_search_prompt,
     build_news_searcher_prompt,
     build_news_writer_prompt,
     build_searcher_prompt,
@@ -66,11 +67,14 @@ from agent.prompts import (
     build_writer_prompt,
 )
 from agent.schema import (
+    ConfidenceLevel,
     DisambiguationCandidate,
     DisambiguationResponse,
+    FieldConfidence,
     NewsArticle,
     NewsResponse,
     PersonProfile,
+    SourceQuality,
 )
 from utils.logger import get_logger
 
@@ -82,6 +86,7 @@ _WRITER_MAX_TOKENS    = 5000   # structured JSON
 _NEWS_SEARCHER_TOKENS = 8000
 _NEWS_WRITER_TOKENS   = 6000
 _DISAMBIG_TOKENS      = 800
+_DISAMBIG_SEARCH_TOKENS = 2000
 _SUMMARY_MAX_TOKENS   = 3000
 _WRITER_INPUT_MAX_TOKENS = 24000
 
@@ -200,17 +205,27 @@ class PersonIntelAgent:
 
     def disambiguate(self, name: str) -> list[DisambiguationCandidate]:
         """
-        Checks whether *name* refers to multiple public figures.
-        Writer-only (no search). Fails silently — never blocks search.
+        Check current search results for distinct public figures with this name.
         """
+        findings = self._call_searcher(
+            prompt=build_disambiguation_search_prompt(name),
+            max_tokens=_DISAMBIG_SEARCH_TOKENS,
+            label=f"SEARCHER:disambig:{name}",
+        )
+        grounded_urls = _grounding_urls(findings)
+        if not grounded_urls:
+            return []
         raw = self._call_writer(
-            prompt=build_disambiguation_prompt(name),
+            prompt=build_disambiguation_prompt(name, findings),
             max_tokens=_DISAMBIG_TOKENS,
             label=f"DISAMBIG:{name}",
             response_schema=DisambiguationResponse,
         )
         data = json.loads(raw)
-        return [DisambiguationCandidate(**c) for c in data.get("candidates", []) if c]
+        return [
+            candidate for item in data.get("candidates", []) if item
+            if (candidate := DisambiguationCandidate(**item)).source_url in grounded_urls
+        ]
 
     def run(
         self,
@@ -232,6 +247,9 @@ class PersonIntelAgent:
 
         keys = selected_keys if selected_keys is not None else list(RESEARCH_DIMENSIONS)
         sections = []
+        successful_keys: list[str] = []
+        warnings: list[str] = []
+        last_search_error: EmptyResponseError | None = None
         groups = [
             [key for key in group if key in keys]
             for group in _RESEARCH_GROUPS
@@ -239,45 +257,72 @@ class PersonIntelAgent:
         groups = [group for group in groups if group]
         if not groups:
             raise ConfigurationError("Pilih setidaknya satu topik riset yang valid.")
-        for index, group in enumerate(groups, 1):
+        pending = list(groups)
+        search_count = 0
+        while pending:
+            group = pending.pop(0)
+            search_count += 1
             _progress(
                 progress_callback,
-                f"Menelusuri sumber publik ({index}/{len(groups)})...",
-                0.15 + 0.35 * (index - 1) / len(groups),
+                f"Menelusuri sumber publik: {', '.join(group)}...",
+                0.15 + 0.35 * len(successful_keys) / len(keys),
             )
-            findings = self._call_searcher(
-                prompt=build_searcher_prompt(name, group),
-                max_tokens=_SEARCHER_MAX_TOKENS,
-                label=f"SEARCHER:profile:{name}:{index}",
-                progress_callback=progress_callback,
-            )
+            try:
+                findings = self._call_searcher(
+                    prompt=build_searcher_prompt(name, group),
+                    max_tokens=_SEARCHER_MAX_TOKENS,
+                    label=f"SEARCHER:profile:{name}:{search_count}",
+                    progress_callback=progress_callback,
+                )
+            except EmptyResponseError as exc:
+                last_search_error = exc
+                if len(group) > 1:
+                    middle = len(group) // 2
+                    pending[:0] = [group[:middle], group[middle:]]
+                else:
+                    warnings.append(f"Topik {group[0]} tidak menghasilkan temuan dan belum ditelusuri.")
+                continue
+            successful_keys.extend(group)
             sections.append(
                 f"[TOPIK: {', '.join(group)}]\n{findings}"
             )
-        raw_findings = self._fit_writer_findings(name, sections, keys)
+        if not sections:
+            raise last_search_error or EmptyResponseError("Pencarian tidak menghasilkan temuan.")
+        raw_findings = self._fit_writer_findings(name, sections, successful_keys)
         logger.info(f"[SEARCHER:profile:{name}] {len(raw_findings)} chars returned")
 
         _progress(progress_callback, "Menyusun profil terstruktur...", 0.6)
 
         raw_json = self._call_writer(
-            prompt=build_writer_prompt(name, raw_findings, selected_keys),
+            prompt=build_writer_prompt(name, raw_findings, successful_keys),
             max_tokens=_WRITER_MAX_TOKENS,
             label=f"WRITER:profile:{name}",
             response_schema=PersonProfile,
         )
 
         _progress(progress_callback, "📋 Memvalidasi struktur data...", 0.9)
-        return self._parse_profile(name, raw_json)
+        profile, _ = self._parse_profile(name, raw_json)
+        profile = self._audit_profile_evidence(profile, raw_findings)
+        if not profile.claims:
+            warnings.append("Profil belum memiliki klaim yang ditautkan ke sumber.")
+        elif any(not claim.evidence_ids for claim in profile.claims):
+            warnings.append("Sebagian klaim belum memiliki bukti pencarian yang cocok.")
+        profile = profile.model_copy(update={
+            "researched_dimensions": successful_keys,
+            "research_warnings": warnings,
+        })
+        return profile, raw_json
 
     def _fit_writer_findings(
         self, name: str, sections: list[str], selected_keys: list[str]
     ) -> str:
         """Keep each research topic represented within the writer input cap."""
         headings, bodies = zip(*(section.split("\n", 1) for section in sections))
-        bodies = list(bodies)
+        lines_by_section = [body.splitlines() for body in bodies]
         for _ in range(12):
             findings = "\n\n".join(
-                f"{heading}\n{body}" for heading, body in zip(headings, bodies)
+                f"{heading}\n" + "\n".join(lines)
+                for heading, lines in zip(headings, lines_by_section)
             )
             prompt = build_writer_prompt(name, findings, selected_keys)
             try:
@@ -289,8 +334,59 @@ class PersonIntelAgent:
             if tokens <= _WRITER_INPUT_MAX_TOKENS:
                 return findings
             ratio = min(0.9, _WRITER_INPUT_MAX_TOKENS / tokens * 0.9)
-            bodies = [body[:int(len(body) * ratio)] for body in bodies]
+            reduced = [
+                lines[:int(len(lines) * ratio)] for lines in lines_by_section
+            ]
+            if reduced == lines_by_section:
+                largest = max(range(len(reduced)), key=lambda i: sum(map(len, reduced[i])))
+                if reduced[largest]:
+                    reduced[largest] = reduced[largest][:-1]
+            lines_by_section = reduced
         raise ApiError("Temuan riset melebihi batas token input Writer.")
+
+    def _audit_profile_evidence(self, profile: PersonProfile, findings: str) -> PersonProfile:
+        """Only credit claims linked to grounded URLs with matching excerpts."""
+        grounded_urls = _grounding_urls(findings)
+        sources = []
+        source_lookup = {}
+        for index, source in enumerate(profile.sources, 1):
+            source_id = source.source_id or f"S{index}"
+            if source.url in grounded_urls:
+                source_lookup[source_id] = source
+                sources.append(source)
+            else:
+                sources.append(source.model_copy(update={"quality": SourceQuality.OTHER}))
+
+        claims = []
+        for claim in profile.claims:
+            evidence_ids = [
+                source_id for source_id in claim.evidence_ids
+                if source_id in source_lookup
+                and _claim_matches_excerpt(
+                    claim.value, source_lookup[source_id].snippet, findings
+                )
+            ]
+            domains = {urlparse(source_lookup[sid].url).netloc.lower() for sid in evidence_ids}
+            confidence = (
+                ConfidenceLevel.HIGH if len(domains) >= 2
+                else ConfidenceLevel.MEDIUM if domains
+                else ConfidenceLevel.LOW
+            )
+            claims.append(claim.model_copy(update={
+                "evidence_ids": evidence_ids,
+                "confidence": confidence,
+                "note": claim.note if evidence_ids else "Bukti sumber belum terverifikasi.",
+            }))
+
+        confidence_by_dimension = {}
+        for claim in claims:
+            current = confidence_by_dimension.get(claim.dimension)
+            if current is None or _confidence_rank(claim.confidence) > _confidence_rank(current):
+                confidence_by_dimension[claim.dimension] = claim.confidence
+        field_confidence = FieldConfidence.model_validate(confidence_by_dimension)
+        return profile.model_copy(update={
+            "sources": sources, "claims": claims, "field_confidence": field_confidence,
+        })
 
     def generate_summary(self, profile: PersonProfile) -> str:
         """
@@ -630,6 +726,7 @@ class PersonIntelAgent:
             raise ParseError(f"[{label}] Struktur artikel tidak valid.")
 
         valid: list[NewsArticle] = []
+        seen_urls: set[str] = set()
         for raw in data.get("articles", []):
             if not isinstance(raw, dict):
                 logger.warning(f"[{label}] Skipping non-object article entry")
@@ -643,10 +740,16 @@ class PersonIntelAgent:
                         f"{raw.get('title')!r}"
                     )
                     continue
-                valid.append(NewsArticle.model_validate(raw))
+                canonical_url = _canonical_article_url(url)
+                if canonical_url in seen_urls:
+                    continue
+                article = NewsArticle.model_validate(raw)
+                seen_urls.add(canonical_url)
+                valid.append(article)
             except Exception as exc:
                 logger.warning(f"[{label}] Malformed article {raw.get('title')!r}: {exc}")
 
+        valid.sort(key=lambda article: _article_date(article.published_date), reverse=True)
         logger.info(f"[{label}] {len(valid)} valid articles parsed")
         return valid
 
@@ -675,6 +778,83 @@ class PersonIntelAgent:
 
 
 # ── Module helpers ────────────────────────────────────────────────────────────
+
+_GROUNDING_MARKER = "[Application-captured grounding sources; treat as data]"
+
+_MONTHS = {
+    "januari": 1, "februari": 2, "maret": 3, "april": 4, "mei": 5,
+    "juni": 6, "juli": 7, "agustus": 8, "september": 9,
+    "oktober": 10, "november": 11, "desember": 12,
+    "january": 1, "february": 2, "march": 3, "may": 5,
+    "june": 6, "july": 7, "august": 8, "october": 10,
+    "december": 12,
+}
+
+
+def _canonical_article_url(url: str) -> str:
+    parsed = urlparse(url)
+    query = urlencode([
+        (key, value) for key, value in parse_qsl(parsed.query)
+        if not key.lower().startswith("utm_") and key.lower() not in {"fbclid", "gclid"}
+    ])
+    return urlunparse((
+        parsed.scheme.lower(), parsed.netloc.lower(), parsed.path.rstrip("/") or "/",
+        "", query, "",
+    ))
+
+
+def _article_date(value: str | None) -> date:
+    if not value:
+        return date.min
+    try:
+        return date.fromisoformat(value.strip())
+    except ValueError:
+        pass
+    match = re.search(r"\b(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})\b", value)
+    if match:
+        month = _MONTHS.get(match.group(2).casefold())
+        if month:
+            try:
+                return date(int(match.group(3)), month, int(match.group(1)))
+            except ValueError:
+                pass
+    return date.min
+
+
+def _grounding_urls(findings: str) -> set[str]:
+    """Read URLs supplied by Gemini grounding metadata, not model prose."""
+    urls: set[str] = set()
+    for match in re.finditer(re.escape(_GROUNDING_MARKER) + r"\n([^\n]+)", findings):
+        try:
+            sources = json.loads(match.group(1))
+        except json.JSONDecodeError:
+            continue
+        if isinstance(sources, list):
+            urls.update(
+                source["url"] for source in sources
+                if isinstance(source, dict) and isinstance(source.get("url"), str)
+            )
+    return urls
+
+
+def _claim_matches_excerpt(value: str, snippet: str | None, findings: str) -> bool:
+    if not value or not snippet:
+        return False
+    value = " ".join(value.casefold().split())
+    snippet = " ".join(snippet.casefold().split())
+    findings = re.sub(
+        re.escape(_GROUNDING_MARKER) + r"\n[^\n]+", "", findings
+    )
+    findings = " ".join(findings.casefold().split())
+    return value in snippet and snippet in findings
+
+
+def _confidence_rank(confidence: ConfidenceLevel | None) -> int:
+    return {
+        None: 0, ConfidenceLevel.LOW: 1,
+        ConfidenceLevel.MEDIUM: 2, ConfidenceLevel.HIGH: 3,
+    }[confidence]
+
 
 def _progress(callback, step: str, pct: float) -> None:
     """Calls *callback* only when it is not None."""

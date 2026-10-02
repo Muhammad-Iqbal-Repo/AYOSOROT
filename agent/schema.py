@@ -108,6 +108,7 @@ class DisambiguationCandidate(BaseModel):
     """One candidate returned by the disambiguation pre-check."""
     name:        str
     description: str   # Short role/context: "Mantan Bupati Garut, Jawa Barat"
+    source_url:  Optional[str] = None
 
 
 class DisambiguationResponse(BaseModel):
@@ -166,6 +167,7 @@ class PersonProfile(BaseModel):
     research_query:        Optional[str] = None
     researched_dimensions: list[str] = Field(default_factory=list)
     researched_at:         Optional[str] = None
+    research_warnings:     list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _validate_evidence_references(self):

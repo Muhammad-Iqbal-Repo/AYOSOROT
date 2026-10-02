@@ -108,6 +108,13 @@ class EvidenceSchemaTests(unittest.TestCase):
         self.assertIn("Profil Resmi", html)
         self.assertIn("2026-06-24", html)
 
+    def test_claim_without_evidence_is_labeled_unverified(self):
+        profile = PersonProfile(full_name="Alex", current_roles=["Mayor"])
+
+        html = _claim_sources_html(profile, "current_roles", "Mayor")
+
+        self.assertIn("Belum terverifikasi", html)
+
 
 class RenderingSafetyTests(unittest.TestCase):
     def test_badge_escapes_html_text(self):

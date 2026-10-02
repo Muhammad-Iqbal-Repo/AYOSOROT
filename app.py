@@ -29,9 +29,12 @@ from ui.news_renderer import render_news
 from ui.report_renderer import render_profile_details, render_profile_header, render_summary
 from utils.cache import (
     build_profile_cache_key,
+    cache_news,
     cache_profile,
     clear_research_state,
     get_cached_profile,
+    get_cached_news,
+    invalidate_cached_news,
     profile_revision,
     profile_session_label,
 )
@@ -380,6 +383,7 @@ def _tab_search(selected_keys: list[str]) -> None:
                                 f"{c.name}: {c.description}": {
                                     "query": f"{c.name}, {c.description}",
                                     "identity_context": c.description,
+                                    "source_url": c.source_url,
                                 }
                                 for c in candidates
                             }
@@ -418,6 +422,8 @@ def _resume_after_disambiguation(selected_keys: list[str]) -> None:
     )
     chosen_label = st.radio("Pilih tokoh:", list(options.keys()), key="disambiguation")
     selection = options[chosen_label]
+    if selection.get("source_url"):
+        st.link_button("Lihat sumber identitas", selection["source_url"])
 
     if st.button("Telusuri pilihan ini", key="disambig_confirm", use_container_width=True):
         _remember_identity_resolution(
@@ -473,7 +479,7 @@ def _run_full_search(
     profile = profile.model_copy(update={
         "identity_context": identity_context,
         "research_query": query,
-        "researched_dimensions": list(selected_keys),
+        "researched_dimensions": profile.researched_dimensions or list(selected_keys),
         "researched_at": datetime.now(timezone.utc).isoformat(),
     })
     cache_profile(ck, profile)
@@ -491,6 +497,8 @@ def _render_profile_section(profile: PersonProfile) -> None:
     actually needed, keeping the common path (just viewing) free of API calls.
     """
     render_profile_header(profile)
+    for warning in profile.research_warnings:
+        st.warning(warning)
 
     # ── AI Summary ─────────────────────────────────────────────────────────────
     st.markdown(
@@ -588,14 +596,15 @@ def _tab_news() -> None:
         revision = profile_revision(profile)
         person_key = f"news_person_{revision}"
 
-        if person_key in st.session_state:
+        cached_person_news = get_cached_news(person_key)
+        if cached_person_news is not None:
             render_news(
-                st.session_state[person_key],
+                cached_person_news,
                 context_label="berita tokoh",
                 filter_key_prefix=f"news_person_{revision}",
             )
             if st.button("Muat ulang", key="refresh_person_news"):
-                del st.session_state[person_key]
+                invalidate_cached_news(person_key)
                 st.rerun()
         else:
             if st.button(
@@ -608,7 +617,7 @@ def _tab_news() -> None:
                         articles = _make_agent().fetch_news(
                             profile.research_query or profile.full_name
                         )
-                    st.session_state[person_key] = articles
+                    cache_news(person_key, articles)
                     st.rerun()
                 except _AGENT_ERRORS as exc:
                     _show_error(exc)
@@ -630,14 +639,15 @@ def _tab_news() -> None:
             )
             company_key = f"news_company_{revision}_{selected_company}"
 
-            if company_key in st.session_state:
+            cached_company_news = get_cached_news(company_key)
+            if cached_company_news is not None:
                 render_news(
-                    st.session_state[company_key],
+                    cached_company_news,
                     context_label=f"berita {selected_company}",
                     filter_key_prefix=f"news_company_{revision}",
                 )
                 if st.button("Muat ulang", key="refresh_company_news"):
-                    del st.session_state[company_key]
+                    invalidate_cached_news(company_key)
                     st.rerun()
             else:
                 if st.button(
@@ -651,7 +661,7 @@ def _tab_news() -> None:
                                 selected_company,
                                 profile.research_query or profile.full_name,
                             )
-                        st.session_state[company_key] = articles
+                        cache_news(company_key, articles)
                         st.rerun()
                     except _AGENT_ERRORS as exc:
                         _show_error(exc)

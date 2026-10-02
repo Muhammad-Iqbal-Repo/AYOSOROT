@@ -9,13 +9,38 @@ within the same session.
 import hashlib
 import json
 from collections.abc import MutableMapping
+from datetime import datetime, timedelta, timezone
 
 import streamlit as st
 
-from agent.schema import PersonProfile
+from agent.schema import NewsArticle, PersonProfile
 
 _CACHE_KEY = "profile_cache"
-_CACHE_CONTRACT_VERSION = "profile-v2"
+_CACHE_CONTRACT_VERSION = "profile-v3"
+_NEWS_TTL = timedelta(hours=6)
+
+
+def get_cached_news(key: str, state: MutableMapping | None = None) -> list[NewsArticle] | None:
+    """Return fresh session news, including an empty result, or None if stale."""
+    target = st.session_state if state is None else state
+    cached_at = target.get(f"news_cached_at_{key}")
+    if key not in target or not isinstance(cached_at, datetime):
+        return None
+    if datetime.now(timezone.utc) - cached_at >= _NEWS_TTL:
+        return None
+    return target[key]
+
+
+def cache_news(key: str, articles: list[NewsArticle], state: MutableMapping | None = None) -> None:
+    target = st.session_state if state is None else state
+    target[key] = articles
+    target[f"news_cached_at_{key}"] = datetime.now(timezone.utc)
+
+
+def invalidate_cached_news(key: str, state: MutableMapping | None = None) -> None:
+    target = st.session_state if state is None else state
+    target.pop(key, None)
+    target.pop(f"news_cached_at_{key}", None)
 
 
 def _normalise_component(value: str) -> str:

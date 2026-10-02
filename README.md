@@ -2,7 +2,9 @@
 
 SOROT is a Streamlit workspace for researching public information about Indonesian figures. It builds an evidence-linked profile with Gemini, then supports comparison, current-news retrieval, and relationship exploration.
 
-Profile research searches selected topics in up to three focused groups: public roles and affiliations, work and business, and family. The writer receives findings from each group, with a 24,000-token input cap checked using Gemini's token counter. If findings exceed the cap, each group's text is shortened proportionally so every selected group remains represented. Selecting more groups can increase search requests, latency, and API usage.
+Profile research searches selected topics in up to three focused groups: public roles and affiliations, work and business, and family. The writer receives findings from each group, with a 24,000-token input cap checked using Gemini's token counter. If findings exceed the cap, complete lines are removed from each group while keeping each topic represented. A search group that reaches its output limit is retried as smaller topics; any topic still missing is shown as a warning. Selecting more groups can increase search requests, latency, and API usage.
+
+Identity choices require URLs captured by Gemini's search grounding. Profile citations receive credit only when their URL was grounded and their excerpt matches the search findings; unmatched claims are shown as unverified. This is a consistency check on search output, not an independent verification of the linked page. News is deduplicated, ordered by recognized publication dates, and refreshed after six hours in the session cache.
 
 ## Requirements
 
