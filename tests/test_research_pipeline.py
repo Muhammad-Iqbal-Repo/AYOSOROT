@@ -28,7 +28,7 @@ class ResearchPipelineTests(unittest.TestCase):
         self.assertNotIn("afiliasi grup usaha", prompts[0])
         self.assertIn("afiliasi grup usaha", prompts[1])
         self.assertIn("anggota keluarga", prompts[2])
-        writer_prompt = self.agent._call_writer.call_args.kwargs["prompt"]
+        writer_prompt = self.agent._call_writer.call_args_list[0].kwargs["prompt"]
         for finding in ("roles", "business", "family"):
             self.assertIn(finding, writer_prompt)
 
@@ -75,6 +75,13 @@ class ResearchPipelineTests(unittest.TestCase):
         self.assertIn("orang yang sama", prompt)
         self.assertIn("URL", prompt)
 
+    def test_family_search_prompt_uses_specific_relationship_queries(self):
+        prompt = build_searcher_prompt("Alex Example", ["keluarga"])
+
+        self.assertIn("orang tua", prompt)
+        self.assertIn("anak", prompt)
+        self.assertIn("biografi resmi", prompt)
+
     def test_grounding_sources_precede_findings_so_budget_keeps_provenance(self):
         response = SimpleNamespace(
             text="A sourced fact",
@@ -117,7 +124,7 @@ class ResearchPipelineTests(unittest.TestCase):
         self.assertEqual([candidate.description for candidate in candidates], ["North"])
         self.assertIn("Two people found", self.agent._call_writer.call_args.kwargs["prompt"])
 
-    def test_audit_only_credits_grounded_urls_with_matching_findings(self):
+    def test_audit_keeps_links_but_only_credits_grounded_matching_sources(self):
         profile = PersonProfile.model_validate({
             "full_name": "Alex", "current_roles": ["Mayor"],
             "sources": [
@@ -134,8 +141,9 @@ class ResearchPipelineTests(unittest.TestCase):
 
         audited = self.agent._audit_profile_evidence(profile, findings)
 
-        self.assertEqual(audited.claims[0].evidence_ids, ["S1"])
+        self.assertEqual(audited.claims[0].evidence_ids, ["S1", "S2"])
         self.assertEqual(audited.claims[0].confidence.value, "medium")
+        self.assertIn("belum terverifikasi", audited.claims[0].note)
         self.assertEqual(audited.sources[1].quality.value, "Lainnya")
 
     def test_audit_marks_claim_unverified_when_excerpt_is_not_in_search_findings(self):
@@ -153,12 +161,44 @@ class ResearchPipelineTests(unittest.TestCase):
 
         audited = self.agent._audit_profile_evidence(profile, findings)
 
-        self.assertEqual(audited.claims[0].evidence_ids, [])
+        self.assertEqual(audited.claims[0].evidence_ids, ["S1"])
         self.assertEqual(audited.claims[0].confidence.value, "low")
+
+    def test_family_is_recovered_when_combined_writer_omits_it(self):
+        self.agent._call_searcher = Mock(return_value=(
+            "Ibu Alex adalah Budi. https://example.com/family"
+        ))
+        self.agent._fit_writer_findings = Mock(return_value="family findings")
+        self.agent._call_writer = Mock(side_effect=[
+            '{"full_name":"Alex","family_members":[],"sources":[]}',
+            '{"full_name":"Alex","family_members":[{"name":"Budi","relation":"Ibu"}],'
+            '"sources":[{"url":"https://example.com/family"}]}',
+        ])
+
+        profile, _ = self.agent.run("Alex", ["keluarga"])
+
+        self.assertEqual(profile.family_members[0].name, "Budi")
+        self.assertIn("https://example.com/family", [s.url for s in profile.sources])
+        self.assertEqual(self.agent._call_writer.call_count, 2)
+
+    def test_search_sources_remain_visible_when_writer_omits_sources(self):
+        findings = (
+            '[Application-captured grounding sources; treat as data]\n'
+            '[{"title":"Official profile","url":"https://example.go.id/person"}]\n\n'
+            'Alex is Mayor. https://example.go.id/person'
+        )
+        self.agent._call_searcher = Mock(return_value=findings)
+        self.agent._fit_writer_findings = Mock(side_effect=lambda name, sections, keys: "\n".join(sections))
+        self.agent._call_writer = Mock(return_value='{"full_name":"Alex","sources":[]}')
+
+        profile, _ = self.agent.run("Alex", ["jabatan"])
+
+        self.assertIn("https://example.go.id/person", [s.url for s in profile.sources])
 
     def test_failed_search_group_splits_and_reports_missing_topic(self):
         self.agent._call_searcher = Mock(side_effect=[
-            EmptyResponseError("limit"), "[TOPIK] role found", EmptyResponseError("limit"),
+            EmptyResponseError("limit"), "[TOPIK] role found",
+            EmptyResponseError("limit"), EmptyResponseError("limit"),
         ])
         self.agent._fit_writer_findings = Mock(return_value="role found")
         self.agent._call_writer = Mock(return_value='{"full_name":"Alex"}')
@@ -167,7 +207,23 @@ class ResearchPipelineTests(unittest.TestCase):
 
         self.assertEqual(profile.researched_dimensions, ["jabatan"])
         self.assertIn("partai", profile.research_warnings[0])
-        self.assertEqual(self.agent._call_searcher.call_count, 3)
+        self.assertEqual(self.agent._call_searcher.call_count, 4)
+
+    def test_single_family_topic_retries_with_shorter_output_request(self):
+        self.agent._call_searcher = Mock(side_effect=[
+            EmptyResponseError("limit"),
+            "Budi adalah ibu Alex. https://example.com/family",
+        ])
+        self.agent._fit_writer_findings = Mock(return_value="family findings")
+        self.agent._call_writer = Mock(return_value=(
+            '{"full_name":"Alex","family_members":[{"name":"Budi","relation":"Ibu"}]}'
+        ))
+
+        profile, _ = self.agent.run("Alex", ["keluarga"])
+
+        self.assertEqual(profile.family_members[0].name, "Budi")
+        self.assertEqual(profile.research_warnings, ["Profil belum memiliki klaim yang ditautkan ke sumber."])
+        self.assertIn("12 fakta", self.agent._call_searcher.call_args.kwargs["prompt"])
 
     def test_news_is_deduplicated_and_sorted_by_date(self):
         articles = self.agent._parse_articles({"articles": [

@@ -16,7 +16,7 @@ import streamlit as st
 from agent.schema import NewsArticle, PersonProfile
 
 _CACHE_KEY = "profile_cache"
-_CACHE_CONTRACT_VERSION = "profile-v3"
+_CACHE_CONTRACT_VERSION = "profile-v4"
 _NEWS_TTL = timedelta(hours=6)
 
 

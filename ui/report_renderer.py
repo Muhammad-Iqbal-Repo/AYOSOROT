@@ -136,6 +136,8 @@ def _claim_sources_html(profile: PersonProfile, field: str, value: str | None = 
             chips.append(_source_chip(source_id, lookup[source_id]))
 
     if chips:
+        if any(claim.note == "Bukti sumber belum terverifikasi." for claim in claims):
+            chips.append(badge("Belum terverifikasi", "#E2E8F0", Colors.MUTED))
         return " ".join(chips)
     return badge("Belum terverifikasi", "#E2E8F0", Colors.MUTED)
 

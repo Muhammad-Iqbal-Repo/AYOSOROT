@@ -115,6 +115,20 @@ class EvidenceSchemaTests(unittest.TestCase):
 
         self.assertIn("Belum terverifikasi", html)
 
+    def test_unverified_claim_keeps_its_source_link(self):
+        profile = PersonProfile.model_validate({
+            "full_name": "Alex",
+            "sources": [{"source_id": "S1", "url": "https://example.com/person"}],
+            "claims": [{"field": "current_roles", "value": "Mayor",
+                        "evidence_ids": ["S1"],
+                        "note": "Bukti sumber belum terverifikasi."}],
+        })
+
+        html = _claim_sources_html(profile, "current_roles", "Mayor")
+
+        self.assertIn("https://example.com/person", html)
+        self.assertIn("Belum terverifikasi", html)
+
 
 class RenderingSafetyTests(unittest.TestCase):
     def test_badge_escapes_html_text(self):

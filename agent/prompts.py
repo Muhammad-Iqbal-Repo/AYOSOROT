@@ -213,6 +213,12 @@ def build_searcher_prompt(name: str, selected_keys: list[str] | None = None) -> 
         for i, k in enumerate(keys)
         if k in RESEARCH_DIMENSIONS
     )
+    family_guidance = (
+        f'- Jika menelusuri keluarga, coba query "{name}" pasangan, istri/suami, '
+        f'orang tua, anak, dan biografi resmi; catat nama serta hubungan yang '
+        f'disebut secara publik, dengan URL sumber untuk masing-masing.\n'
+        if "keluarga" in keys else ""
+    )
 
     return (
         f"Lakukan pencarian web mendalam tentang tokoh publik Indonesia berikut:\n\n"
@@ -227,6 +233,7 @@ def build_searcher_prompt(name: str, selected_keys: list[str] | None = None) -> 
         f"- Untuk tiap fakta catat nama sumber, URL halaman, dan tanggal peristiwa bila tersedia\n"
         f"- Jangan menyimpulkan fakta dari judul atau cuplikan yang tidak mendukungnya\n"
         f"- Tulis satu fakta singkat per baris per topik, dengan URL sumber pada baris yang sama\n"
+        f"{family_guidance}"
         f"- JANGAN format sebagai JSON — cukup tulis semua fakta yang ditemukan\n"
         f"- Jika suatu informasi tidak ditemukan, tulis 'Tidak ditemukan'\n\n"
         f"Format output:\n"
